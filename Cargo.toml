@@ -1,0 +1,31 @@
+[package]
+name = "autoloop"
+version = "0.1.0"
+edition = "2024"
+description = "Agent-agnostic iterative optimization CLI"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.6.0", features = ["derive"] }
+comfy-table = "7.2.2"
+console = "0.16.3"
+dialoguer = "0.12.0"
+git2 = "0.20.4"
+indicatif = "0.18.4"
+regex = "1.12.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+toml = "1.1.0"
+
+[dev-dependencies]
+assert_cmd = "2.2.0"
+predicates = "3.1.4"
+tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,26 @@
+mod baseline;
+mod discard;
+mod eval;
+mod init;
+mod keep;
+mod session;
+mod status;
+
+use anyhow::Result;
+
+use crate::cli::{CliCommand, OutputFormat, SessionAction};
+
+pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
+    match command {
+        CliCommand::Init(args) => init::run(args, output),
+        CliCommand::Baseline(args) => baseline::run(args, output),
+        CliCommand::Session(args) => match args.action {
+            SessionAction::Start(start_args) => session::start(start_args, output),
+            SessionAction::End(end_args) => session::end(end_args, output),
+        },
+        CliCommand::Eval(args) => eval::run(args, output),
+        CliCommand::Keep(args) => keep::run(args, output),
+        CliCommand::Discard(args) => discard::run(args, output),
+        CliCommand::Status(args) => status::run(args, output),
+    }
+}
