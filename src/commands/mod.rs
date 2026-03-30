@@ -4,6 +4,7 @@ mod eval;
 mod init;
 mod keep;
 mod learn;
+mod pre;
 mod session;
 mod status;
 
@@ -19,6 +20,7 @@ pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
             SessionAction::Start(start_args) => session::start(start_args, output),
             SessionAction::End(end_args) => session::end(end_args, output),
         },
+        CliCommand::Pre(args) => pre::run(args, output),
         CliCommand::Eval(args) => eval::run(args, output),
         CliCommand::Keep(args) => keep::run(args, output),
         CliCommand::Discard(args) => discard::run(args, output),

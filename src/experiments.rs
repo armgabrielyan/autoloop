@@ -208,6 +208,80 @@ pub struct LearnReport {
     pub session_trajectory: Vec<SessionTrajectory>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuerySource {
+    WorkingTree,
+    Description,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategorySignal {
+    pub name: String,
+    pub attempts: usize,
+    pub kept: usize,
+    pub discarded: usize,
+    pub crashed: usize,
+    pub success_rate: f64,
+    pub sampling_probability: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarExperiment {
+    pub experiment_id: u64,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub status: ExperimentStatus,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub metric_name: Option<String>,
+    #[serde(default)]
+    pub metric_value: Option<f64>,
+    #[serde(default)]
+    pub delta_from_baseline: Option<f64>,
+    #[serde(default)]
+    pub percent_from_baseline: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub shared_categories: Vec<String>,
+    #[serde(default)]
+    pub shared_file_paths: Vec<String>,
+    pub exact_description_match: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreflightVerdict {
+    Proceed,
+    Caution,
+    Avoid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreflightReport {
+    pub description: String,
+    pub source: QuerySource,
+    #[serde(default)]
+    pub file_paths: Vec<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    pub exact_matches: usize,
+    pub similar_experiments: usize,
+    pub kept: usize,
+    pub discarded: usize,
+    pub crashed: usize,
+    #[serde(default)]
+    pub category_signals: Vec<CategorySignal>,
+    #[serde(default)]
+    pub matches: Vec<SimilarExperiment>,
+    pub verdict: PreflightVerdict,
+    pub verdict_reason: String,
+}
+
 pub fn experiments_path(root: &Path) -> PathBuf {
     autoloop_dir(root).join(EXPERIMENTS_FILE)
 }
@@ -304,6 +378,98 @@ pub fn learn_report(
         dead_end_categories: dead_end_categories(&finalized),
         file_patterns: consistent_file_patterns(&finalized),
         session_trajectory: session_trajectory(&finalized, direction),
+    })
+}
+
+pub fn preflight_report(
+    root: &Path,
+    description: &str,
+    source: QuerySource,
+    file_paths: &[String],
+    categories: &[String],
+) -> Result<PreflightReport> {
+    let records = load_records(root)?;
+    let finalized: Vec<&ExperimentRecord> = records
+        .iter()
+        .filter(|record| !matches!(record.status, ExperimentStatus::Baseline))
+        .collect();
+    let normalized_description = normalize_description(description);
+    let mut matches: Vec<SimilarExperiment> = finalized
+        .iter()
+        .filter_map(|record| {
+            let exact_description_match = record
+                .description
+                .as_deref()
+                .map(normalize_description)
+                .as_deref()
+                == Some(normalized_description.as_str());
+            let shared_categories = shared_categories(record, categories);
+            let shared_file_paths = shared_file_paths(record, file_paths);
+            if !exact_description_match
+                && shared_categories.is_empty()
+                && shared_file_paths.is_empty()
+            {
+                return None;
+            }
+
+            Some(similar_experiment(
+                record,
+                exact_description_match,
+                shared_categories,
+                shared_file_paths,
+            ))
+        })
+        .collect();
+
+    matches.sort_by(|left, right| {
+        similarity_score(right)
+            .cmp(&similarity_score(left))
+            .then_with(|| right.experiment_id.cmp(&left.experiment_id))
+    });
+
+    let exact_matches = matches
+        .iter()
+        .filter(|entry| entry.exact_description_match)
+        .count();
+    let similar_experiments = matches.len();
+    let kept = matches
+        .iter()
+        .filter(|entry| matches!(entry.status, ExperimentStatus::Kept))
+        .count();
+    let discarded = matches
+        .iter()
+        .filter(|entry| matches!(entry.status, ExperimentStatus::Discarded))
+        .count();
+    let crashed = matches
+        .iter()
+        .filter(|entry| matches!(entry.status, ExperimentStatus::Crashed))
+        .count();
+    let category_signals = category_signals(&finalized, categories);
+    let (verdict, verdict_reason) = preflight_verdict(
+        exact_matches,
+        kept,
+        discarded,
+        crashed,
+        similar_experiments,
+        &category_signals,
+    );
+
+    matches.truncate(5);
+
+    Ok(PreflightReport {
+        description: description.to_string(),
+        source,
+        file_paths: file_paths.to_vec(),
+        categories: categories.to_vec(),
+        exact_matches,
+        similar_experiments,
+        kept,
+        discarded,
+        crashed,
+        category_signals,
+        matches,
+        verdict,
+        verdict_reason,
     })
 }
 
@@ -733,4 +899,187 @@ fn normalized_delta(direction: MetricDirection, delta: Option<f64>) -> f64 {
         (MetricDirection::Lower, Some(delta)) => -delta,
         (MetricDirection::Higher, Some(delta)) => delta,
     }
+}
+
+fn shared_categories(record: &ExperimentRecord, categories: &[String]) -> Vec<String> {
+    let Some(tags) = &record.tags else {
+        return Vec::new();
+    };
+
+    tags.auto_categories
+        .iter()
+        .filter(|category| categories.iter().any(|candidate| candidate == *category))
+        .cloned()
+        .collect()
+}
+
+fn shared_file_paths(record: &ExperimentRecord, file_paths: &[String]) -> Vec<String> {
+    let Some(tags) = &record.tags else {
+        return Vec::new();
+    };
+
+    tags.file_paths
+        .iter()
+        .filter(|path| file_paths.iter().any(|candidate| candidate == *path))
+        .cloned()
+        .collect()
+}
+
+fn similar_experiment(
+    record: &ExperimentRecord,
+    exact_description_match: bool,
+    shared_categories: Vec<String>,
+    shared_file_paths: Vec<String>,
+) -> SimilarExperiment {
+    let (metric_name, metric_value, delta_from_baseline, percent_from_baseline, unit) =
+        if let Some(metric) = &record.metric {
+            (
+                Some(metric.name.clone()),
+                Some(metric.value),
+                metric.delta_from_baseline,
+                metric
+                    .baseline
+                    .filter(|baseline| *baseline != 0.0)
+                    .zip(metric.delta_from_baseline)
+                    .map(|(baseline, delta)| delta / baseline * 100.0),
+                metric.unit.clone(),
+            )
+        } else {
+            (None, None, None, None, None)
+        };
+
+    SimilarExperiment {
+        experiment_id: record.id,
+        session_id: record.session_id.clone(),
+        status: record.status.clone(),
+        description: record.description.clone(),
+        reason: record.reason.clone(),
+        metric_name,
+        metric_value,
+        delta_from_baseline,
+        percent_from_baseline,
+        unit,
+        shared_categories,
+        shared_file_paths,
+        exact_description_match,
+    }
+}
+
+fn similarity_score(experiment: &SimilarExperiment) -> usize {
+    let exact = usize::from(experiment.exact_description_match) * 100;
+    exact + experiment.shared_file_paths.len() * 10 + experiment.shared_categories.len()
+}
+
+fn category_signals(records: &[&ExperimentRecord], categories: &[String]) -> Vec<CategorySignal> {
+    let mut signals = Vec::new();
+
+    for category in categories {
+        let mut kept = 0;
+        let mut discarded = 0;
+        let mut crashed = 0;
+
+        for record in records {
+            let Some(tags) = &record.tags else {
+                continue;
+            };
+            if !tags
+                .auto_categories
+                .iter()
+                .any(|candidate| candidate == category)
+            {
+                continue;
+            }
+
+            match record.status {
+                ExperimentStatus::Kept => kept += 1,
+                ExperimentStatus::Discarded => discarded += 1,
+                ExperimentStatus::Crashed => crashed += 1,
+                ExperimentStatus::Baseline => {}
+            }
+        }
+
+        let attempts = kept + discarded + crashed;
+        if attempts == 0 {
+            continue;
+        }
+
+        signals.push(CategorySignal {
+            name: category.clone(),
+            attempts,
+            kept,
+            discarded,
+            crashed,
+            success_rate: kept as f64 / attempts as f64,
+            sampling_probability: (kept as f64 + 1.0) / (attempts as f64 + 2.0),
+        });
+    }
+
+    signals.sort_by(|left, right| {
+        right
+            .sampling_probability
+            .partial_cmp(&left.sampling_probability)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.attempts.cmp(&left.attempts))
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    signals
+}
+
+fn preflight_verdict(
+    exact_matches: usize,
+    kept: usize,
+    discarded: usize,
+    crashed: usize,
+    similar_experiments: usize,
+    category_signals: &[CategorySignal],
+) -> (PreflightVerdict, String) {
+    let failures = discarded + crashed;
+    if similar_experiments == 0 {
+        return (
+            PreflightVerdict::Proceed,
+            "no similar experiments are recorded yet".to_string(),
+        );
+    }
+
+    if exact_matches > 0 && kept == 0 {
+        return (
+            PreflightVerdict::Avoid,
+            "this exact description only appears in failed experiments".to_string(),
+        );
+    }
+
+    if failures >= 2 && kept == 0 {
+        return (
+            PreflightVerdict::Avoid,
+            "similar experiments have repeatedly failed".to_string(),
+        );
+    }
+
+    if kept > failures {
+        return (
+            PreflightVerdict::Proceed,
+            "similar experiments have a positive history".to_string(),
+        );
+    }
+
+    if let Some(best_category) = category_signals.first() {
+        if best_category.success_rate >= 0.6 {
+            return (
+                PreflightVerdict::Proceed,
+                format!(
+                    "category `{}` has worked {}/{} times",
+                    best_category.name, best_category.kept, best_category.attempts
+                ),
+            );
+        }
+    }
+
+    (
+        PreflightVerdict::Caution,
+        "history is mixed; proceed carefully and validate quickly".to_string(),
+    )
+}
+
+fn normalize_description(description: &str) -> String {
+    description.trim().to_ascii_lowercase()
 }

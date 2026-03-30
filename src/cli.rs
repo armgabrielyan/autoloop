@@ -36,6 +36,7 @@ pub enum CliCommand {
     Init(InitArgs),
     Baseline(BaselineArgs),
     Session(SessionArgs),
+    Pre(PreArgs),
     Eval(EvalArgs),
     Keep(KeepArgs),
     Discard(DiscardArgs),
@@ -75,6 +76,12 @@ pub struct SessionStartArgs {
 
 #[derive(Debug, Args, Clone, Default)]
 pub struct SessionEndArgs {}
+
+#[derive(Debug, Args, Clone)]
+pub struct PreArgs {
+    #[arg(long)]
+    pub description: String,
+}
 
 #[derive(Debug, Args, Clone)]
 pub struct EvalArgs {
