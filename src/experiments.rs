@@ -135,6 +135,79 @@ pub struct ExperimentAnalysis {
     pub category_rates: Vec<CategoryRate>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RankedExperiment {
+    pub experiment_id: u64,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub status: ExperimentStatus,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub metric_name: Option<String>,
+    #[serde(default)]
+    pub metric_value: Option<f64>,
+    #[serde(default)]
+    pub delta_from_baseline: Option<f64>,
+    #[serde(default)]
+    pub percent_from_baseline: Option<f64>,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub file_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeadEndCategory {
+    pub name: String,
+    pub attempts: usize,
+    pub discarded: usize,
+    pub crashed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilePattern {
+    pub path: String,
+    pub attempts: usize,
+    pub kept: usize,
+    pub discarded: usize,
+    pub crashed: usize,
+    pub success_rate: f64,
+    pub signal: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTrajectory {
+    #[serde(default)]
+    pub session_id: Option<String>,
+    pub experiments_run: usize,
+    pub kept: usize,
+    pub discarded: usize,
+    pub crashed: usize,
+    #[serde(default)]
+    pub best_improvement: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LearnReport {
+    pub summary: ExperimentAnalysis,
+    pub sessions_seen: usize,
+    #[serde(default)]
+    pub best_experiments: Vec<RankedExperiment>,
+    #[serde(default)]
+    pub worst_experiments: Vec<RankedExperiment>,
+    #[serde(default)]
+    pub dead_end_categories: Vec<DeadEndCategory>,
+    #[serde(default)]
+    pub file_patterns: Vec<FilePattern>,
+    #[serde(default)]
+    pub session_trajectory: Vec<SessionTrajectory>,
+}
+
 pub fn experiments_path(root: &Path) -> PathBuf {
     autoloop_dir(root).join(EXPERIMENTS_FILE)
 }
@@ -189,48 +262,52 @@ pub fn metric_observations(root: &Path, metric_name: &str) -> Result<Vec<f64>> {
     Ok(observations)
 }
 
+pub fn latest_session_id(root: &Path) -> Result<Option<String>> {
+    let records = load_records(root)?;
+    Ok(records
+        .iter()
+        .filter_map(|record| {
+            record
+                .session_id
+                .as_ref()
+                .map(|session_id| (record.timestamp, session_id.clone()))
+        })
+        .max_by_key(|(timestamp, _)| *timestamp)
+        .map(|(_, session_id)| session_id))
+}
+
 pub fn analyze_records(
     root: &Path,
     session_id: Option<&str>,
     direction: MetricDirection,
 ) -> Result<ExperimentAnalysis> {
     let records = load_records(root)?;
-    let filtered: Vec<&ExperimentRecord> = records
-        .iter()
-        .filter(|record| match session_id {
-            Some(session_id) => record.session_id.as_deref() == Some(session_id),
-            None => true,
-        })
-        .collect();
-    let finalized: Vec<&ExperimentRecord> = filtered
-        .into_iter()
-        .filter(|record| !matches!(record.status, ExperimentStatus::Baseline))
-        .collect();
-
-    let mut analysis = ExperimentAnalysis::default();
-    analysis.experiments_run = finalized.len();
-
-    for record in &finalized {
-        match record.status {
-            ExperimentStatus::Kept => analysis.kept += 1,
-            ExperimentStatus::Discarded => analysis.discarded += 1,
-            ExperimentStatus::Crashed => analysis.crashed += 1,
-            ExperimentStatus::Baseline => {}
-        }
-    }
-
-    analysis.current_streak = current_streak(&finalized);
-    analysis.best_improvement = best_improvement(&finalized, direction);
-    analysis.cumulative_improvement = analysis
-        .best_improvement
-        .as_ref()
-        .and_then(|best| best.percent_from_baseline);
-    analysis.category_rates = category_rates(&finalized);
-
-    Ok(analysis)
+    let filtered = filter_records(&records, session_id);
+    let finalized = finalized_records(&filtered);
+    Ok(analysis_from_finalized(&finalized, direction))
 }
 
-fn load_records(root: &Path) -> Result<Vec<ExperimentRecord>> {
+pub fn learn_report(
+    root: &Path,
+    session_id: Option<&str>,
+    direction: MetricDirection,
+) -> Result<LearnReport> {
+    let records = load_records(root)?;
+    let filtered = filter_records(&records, session_id);
+    let finalized = finalized_records(&filtered);
+
+    Ok(LearnReport {
+        summary: analysis_from_finalized(&finalized, direction),
+        sessions_seen: unique_sessions(&filtered),
+        best_experiments: ranked_best_experiments(&finalized, direction, 3),
+        worst_experiments: ranked_worst_experiments(&finalized, direction, 3),
+        dead_end_categories: dead_end_categories(&finalized),
+        file_patterns: consistent_file_patterns(&finalized),
+        session_trajectory: session_trajectory(&finalized, direction),
+    })
+}
+
+pub fn load_records(root: &Path) -> Result<Vec<ExperimentRecord>> {
     let path = experiments_path(root);
     if !path.exists() {
         return Ok(Vec::new());
@@ -249,6 +326,63 @@ fn load_records(root: &Path) -> Result<Vec<ExperimentRecord>> {
     }
 
     Ok(records)
+}
+
+fn filter_records<'a>(
+    records: &'a [ExperimentRecord],
+    session_id: Option<&str>,
+) -> Vec<&'a ExperimentRecord> {
+    records
+        .iter()
+        .filter(|record| match session_id {
+            Some(session_id) => record.session_id.as_deref() == Some(session_id),
+            None => true,
+        })
+        .collect()
+}
+
+fn finalized_records<'a>(records: &[&'a ExperimentRecord]) -> Vec<&'a ExperimentRecord> {
+    records
+        .iter()
+        .copied()
+        .filter(|record| !matches!(record.status, ExperimentStatus::Baseline))
+        .collect()
+}
+
+fn analysis_from_finalized(
+    finalized: &[&ExperimentRecord],
+    direction: MetricDirection,
+) -> ExperimentAnalysis {
+    let mut analysis = ExperimentAnalysis {
+        experiments_run: finalized.len(),
+        ..ExperimentAnalysis::default()
+    };
+
+    for record in finalized {
+        match record.status {
+            ExperimentStatus::Kept => analysis.kept += 1,
+            ExperimentStatus::Discarded => analysis.discarded += 1,
+            ExperimentStatus::Crashed => analysis.crashed += 1,
+            ExperimentStatus::Baseline => {}
+        }
+    }
+
+    analysis.current_streak = current_streak(finalized);
+    analysis.best_improvement = best_improvement(finalized, direction);
+    analysis.cumulative_improvement = analysis
+        .best_improvement
+        .as_ref()
+        .and_then(|best| best.percent_from_baseline);
+    analysis.category_rates = category_rates(finalized);
+    analysis
+}
+
+fn unique_sessions(records: &[&ExperimentRecord]) -> usize {
+    records
+        .iter()
+        .filter_map(|record| record.session_id.as_deref())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
 }
 
 fn current_streak(records: &[&ExperimentRecord]) -> Option<StreakSummary> {
@@ -380,4 +514,223 @@ fn category_rates(records: &[&ExperimentRecord]) -> Vec<CategoryRate> {
             .then_with(|| left.name.cmp(&right.name))
     });
     categories
+}
+
+fn ranked_best_experiments(
+    records: &[&ExperimentRecord],
+    direction: MetricDirection,
+    limit: usize,
+) -> Vec<RankedExperiment> {
+    let mut ranked: Vec<RankedExperiment> = records
+        .iter()
+        .filter(|record| matches!(record.status, ExperimentStatus::Kept))
+        .filter_map(|record| {
+            let ranked = ranked_experiment(record)?;
+            let delta = ranked.delta_from_baseline?;
+            is_improvement(direction, delta).then_some(ranked)
+        })
+        .collect();
+
+    ranked.sort_by(|left, right| {
+        normalized_delta(direction, right.delta_from_baseline)
+            .partial_cmp(&normalized_delta(direction, left.delta_from_baseline))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.experiment_id.cmp(&right.experiment_id))
+    });
+    ranked.truncate(limit);
+    ranked
+}
+
+fn ranked_worst_experiments(
+    records: &[&ExperimentRecord],
+    direction: MetricDirection,
+    limit: usize,
+) -> Vec<RankedExperiment> {
+    let mut ranked: Vec<RankedExperiment> = records
+        .iter()
+        .filter_map(|record| {
+            let ranked = ranked_experiment(record)?;
+            let delta = ranked.delta_from_baseline?;
+            (!is_improvement(direction, delta)).then_some(ranked)
+        })
+        .collect();
+
+    ranked.sort_by(|left, right| {
+        normalized_delta(direction, left.delta_from_baseline)
+            .partial_cmp(&normalized_delta(direction, right.delta_from_baseline))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.experiment_id.cmp(&right.experiment_id))
+    });
+    ranked.truncate(limit);
+    ranked
+}
+
+fn ranked_experiment(record: &ExperimentRecord) -> Option<RankedExperiment> {
+    let metric = record.metric.as_ref()?;
+    Some(RankedExperiment {
+        experiment_id: record.id,
+        session_id: record.session_id.clone(),
+        status: record.status.clone(),
+        description: record.description.clone(),
+        reason: record.reason.clone(),
+        metric_name: Some(metric.name.clone()),
+        metric_value: Some(metric.value),
+        delta_from_baseline: metric.delta_from_baseline,
+        percent_from_baseline: metric
+            .baseline
+            .filter(|baseline| *baseline != 0.0)
+            .zip(metric.delta_from_baseline)
+            .map(|(baseline, delta)| delta / baseline * 100.0),
+        unit: metric.unit.clone(),
+        categories: record
+            .tags
+            .as_ref()
+            .map(|tags| tags.auto_categories.clone())
+            .unwrap_or_default(),
+        file_paths: record
+            .tags
+            .as_ref()
+            .map(|tags| tags.file_paths.clone())
+            .unwrap_or_default(),
+    })
+}
+
+fn dead_end_categories(records: &[&ExperimentRecord]) -> Vec<DeadEndCategory> {
+    let mut stats: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+
+    for record in records {
+        let Some(tags) = &record.tags else {
+            continue;
+        };
+        for category in &tags.auto_categories {
+            let entry = stats.entry(category.clone()).or_default();
+            match record.status {
+                ExperimentStatus::Kept => entry.0 += 1,
+                ExperimentStatus::Discarded => entry.1 += 1,
+                ExperimentStatus::Crashed => entry.2 += 1,
+                ExperimentStatus::Baseline => {}
+            }
+        }
+    }
+
+    let mut dead_ends: Vec<DeadEndCategory> = stats
+        .into_iter()
+        .filter_map(|(name, (kept, discarded, crashed))| {
+            let attempts = kept + discarded + crashed;
+            (attempts >= 3 && kept == 0).then_some(DeadEndCategory {
+                name,
+                attempts,
+                discarded,
+                crashed,
+            })
+        })
+        .collect();
+
+    dead_ends.sort_by(|left, right| {
+        right
+            .attempts
+            .cmp(&left.attempts)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    dead_ends
+}
+
+fn consistent_file_patterns(records: &[&ExperimentRecord]) -> Vec<FilePattern> {
+    let mut stats: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new();
+
+    for record in records {
+        let Some(tags) = &record.tags else {
+            continue;
+        };
+        for path in &tags.file_paths {
+            let entry = stats.entry(path.clone()).or_default();
+            match record.status {
+                ExperimentStatus::Kept => entry.0 += 1,
+                ExperimentStatus::Discarded => entry.1 += 1,
+                ExperimentStatus::Crashed => entry.2 += 1,
+                ExperimentStatus::Baseline => {}
+            }
+        }
+    }
+
+    let mut patterns: Vec<FilePattern> = stats
+        .into_iter()
+        .filter_map(|(path, (kept, discarded, crashed))| {
+            let attempts = kept + discarded + crashed;
+            if attempts < 2 {
+                return None;
+            }
+
+            let signal = if kept == attempts {
+                Some("always_kept".to_string())
+            } else if kept == 0 {
+                Some("never_kept".to_string())
+            } else {
+                None
+            }?;
+
+            let success_rate = kept as f64 / attempts as f64;
+            Some(FilePattern {
+                path,
+                attempts,
+                kept,
+                discarded,
+                crashed,
+                success_rate,
+                signal,
+            })
+        })
+        .collect();
+
+    patterns.sort_by(|left, right| {
+        right
+            .attempts
+            .cmp(&left.attempts)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    patterns
+}
+
+fn session_trajectory(
+    records: &[&ExperimentRecord],
+    direction: MetricDirection,
+) -> Vec<SessionTrajectory> {
+    let mut grouped: BTreeMap<Option<String>, Vec<&ExperimentRecord>> = BTreeMap::new();
+
+    for record in records {
+        grouped
+            .entry(record.session_id.clone())
+            .or_default()
+            .push(*record);
+    }
+
+    let mut trajectory: Vec<SessionTrajectory> = grouped
+        .into_iter()
+        .map(|(session_id, records)| {
+            let analysis = analysis_from_finalized(&records, direction);
+            let best_improvement = analysis
+                .best_improvement
+                .as_ref()
+                .and_then(|best| best.percent_from_baseline);
+            SessionTrajectory {
+                session_id,
+                experiments_run: analysis.experiments_run,
+                kept: analysis.kept,
+                discarded: analysis.discarded,
+                crashed: analysis.crashed,
+                best_improvement,
+            }
+        })
+        .collect();
+
+    trajectory.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+    trajectory
+}
+
+fn normalized_delta(direction: MetricDirection, delta: Option<f64>) -> f64 {
+    match (direction, delta) {
+        (_, None) => 0.0,
+        (MetricDirection::Lower, Some(delta)) => -delta,
+        (MetricDirection::Higher, Some(delta)) => delta,
+    }
 }

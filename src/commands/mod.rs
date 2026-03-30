@@ -3,6 +3,7 @@ mod discard;
 mod eval;
 mod init;
 mod keep;
+mod learn;
 mod session;
 mod status;
 
@@ -22,5 +23,6 @@ pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
         CliCommand::Keep(args) => keep::run(args, output),
         CliCommand::Discard(args) => discard::run(args, output),
         CliCommand::Status(args) => status::run(args, output),
+        CliCommand::Learn(args) => learn::run(args, output),
     }
 }

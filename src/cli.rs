@@ -40,6 +40,7 @@ pub enum CliCommand {
     Keep(KeepArgs),
     Discard(DiscardArgs),
     Status(StatusArgs),
+    Learn(LearnArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -104,6 +105,15 @@ pub struct DiscardArgs {
 
 #[derive(Debug, Args, Clone)]
 pub struct StatusArgs {
+    #[arg(long)]
+    pub all: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct LearnArgs {
+    #[arg(long, conflicts_with = "all")]
+    pub session: bool,
+
     #[arg(long)]
     pub all: bool,
 }

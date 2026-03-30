@@ -122,7 +122,7 @@ pub fn end(_args: SessionEndArgs, output: OutputFormat) -> Result<()> {
         "Next",
         &[
             "Run `autoloop status --all` to inspect cumulative history".to_string(),
-            "Update `.autoloop/learnings.md` from the session summary".to_string(),
+            "Run `autoloop learn --session` to extract patterns for this session".to_string(),
         ],
     ) {
         blocks.push(next_block);
