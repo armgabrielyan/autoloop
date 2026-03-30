@@ -22,6 +22,8 @@ pub struct State {
     #[serde(default)]
     pub baseline_guardrails: Vec<GuardrailBaseline>,
     pub next_experiment_id: u64,
+    #[serde(default = "default_next_session_id")]
+    pub next_session_id: u64,
 }
 
 impl Default for State {
@@ -32,6 +34,7 @@ impl Default for State {
             baseline: None,
             baseline_guardrails: Vec::new(),
             next_experiment_id: 1,
+            next_session_id: default_next_session_id(),
         }
     }
 }
@@ -127,6 +130,10 @@ pub enum EvalVerdict {
     Keep,
     Discard,
     Rerun,
+}
+
+fn default_next_session_id() -> u64 {
+    1
 }
 
 pub fn state_path(root: &Path) -> PathBuf {
