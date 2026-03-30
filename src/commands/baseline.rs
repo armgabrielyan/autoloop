@@ -72,6 +72,10 @@ pub fn run(_args: BaselineArgs, output: OutputFormat) -> Result<()> {
         verdict: None,
         guardrails: guardrails.clone(),
         command: Some(metric.command.clone()),
+        tags: None,
+        diff_summary: None,
+        diff: None,
+        commit_hash: None,
     };
 
     append_record(&root, &record)?;

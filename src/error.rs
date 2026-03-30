@@ -39,6 +39,12 @@ pub enum GitError {
         #[source]
         source: io::Error,
     },
+    #[error("git operation failed: {operation}")]
+    Operation {
+        operation: &'static str,
+        #[source]
+        source: git2::Error,
+    },
 }
 
 #[derive(Debug, Error)]

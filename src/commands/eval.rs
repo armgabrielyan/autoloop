@@ -12,6 +12,7 @@ use crate::eval::{
     run_metric_command_with_retries, run_raw_command_capture,
 };
 use crate::experiments::{ExperimentRecord, ExperimentStatus, append_record, metric_observations};
+use crate::git::capture_working_tree;
 use crate::output::emit;
 use crate::state::{
     EvalVerdict, GuardrailBaseline, GuardrailOutcome, LastEvalState, PendingEval, State,
@@ -78,6 +79,7 @@ pub fn run(args: EvalArgs, output: OutputFormat) -> Result<()> {
         config.confidence.keep_threshold,
         guardrails.iter().all(|guardrail| guardrail.passed),
     );
+    let snapshot = capture_working_tree(&root)?;
 
     let pending_eval = PendingEval {
         metric: metric.metric.clone(),
@@ -86,7 +88,7 @@ pub fn run(args: EvalArgs, output: OutputFormat) -> Result<()> {
         verdict,
         command: metric.command.clone(),
         guardrails: guardrails.clone(),
-        diff_fingerprint: None,
+        diff_fingerprint: snapshot.fingerprint,
     };
     last_eval.pending_eval = Some(pending_eval.clone());
     last_eval.save(&root)?;
@@ -240,6 +242,10 @@ fn log_crash(
         verdict: None,
         guardrails,
         command: Some(failure.command.clone()),
+        tags: None,
+        diff_summary: None,
+        diff: None,
+        commit_hash: None,
     };
     append_record(root, &record)?;
     state.next_experiment_id += 1;
