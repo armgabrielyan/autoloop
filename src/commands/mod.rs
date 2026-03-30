@@ -1,6 +1,7 @@
 mod baseline;
 mod discard;
 mod eval;
+mod finalize;
 mod init;
 mod keep;
 mod learn;
@@ -26,5 +27,6 @@ pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
         CliCommand::Discard(args) => discard::run(args, output),
         CliCommand::Status(args) => status::run(args, output),
         CliCommand::Learn(args) => learn::run(args, output),
+        CliCommand::Finalize(args) => finalize::run(args, output),
     }
 }

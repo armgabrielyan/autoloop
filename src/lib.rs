@@ -4,6 +4,7 @@ pub mod config;
 pub mod error;
 pub mod eval;
 pub mod experiments;
+pub mod finalize;
 pub mod git;
 pub mod output;
 pub mod shell;

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use git2::{
-    DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType, Oid, Repository, Signature,
-    Status, StatusOptions, StatusShow, build::CheckoutBuilder,
+    BranchType, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, ObjectType, Oid, Repository,
+    Signature, Status, StatusOptions, StatusShow, build::CheckoutBuilder,
 };
 
 use crate::error::GitError;
@@ -20,6 +20,20 @@ pub struct WorkingTreeSnapshot {
     pub diff_summary: Option<String>,
     pub diff: Option<String>,
     pub untracked_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HeadState {
+    pub refname: Option<String>,
+    pub oid: Oid,
+}
+
+#[derive(Debug, Clone)]
+pub struct FinalizedBranch {
+    pub branch_name: String,
+    pub base_commit: String,
+    pub head_commit: String,
+    pub applied_commits: Vec<String>,
 }
 
 pub fn ensure_gitignore_contains(root: &Path, entry: &str) -> Result<bool> {
@@ -108,6 +122,156 @@ pub fn capture_working_tree(root: &Path) -> Result<WorkingTreeSnapshot> {
         diff_summary,
         diff,
         untracked_paths,
+    })
+}
+
+pub fn ensure_clean_worktree(root: &Path) -> Result<()> {
+    let snapshot = capture_working_tree(root)?;
+    if snapshot.has_changes {
+        bail!("finalize requires a clean working tree; commit or discard local changes first");
+    }
+
+    Ok(())
+}
+
+pub fn capture_head_state(root: &Path) -> Result<HeadState> {
+    let repo = require_repository(root)?;
+    let head = repo.head().map_err(|source| GitError::Operation {
+        operation: "read HEAD reference",
+        source,
+    })?;
+    let oid = head
+        .target()
+        .ok_or_else(|| anyhow!("HEAD does not point to a commit"))?;
+    Ok(HeadState {
+        refname: head.name().map(ToString::to_string),
+        oid,
+    })
+}
+
+pub fn restore_head(root: &Path, state: &HeadState) -> Result<()> {
+    let repo = require_repository(root)?;
+    match &state.refname {
+        Some(refname) => {
+            repo.set_head(refname)
+                .map_err(|source| GitError::Operation {
+                    operation: "restore HEAD reference",
+                    source,
+                })?;
+            let mut checkout = CheckoutBuilder::new();
+            checkout.force().recreate_missing(true).update_index(true);
+            repo.checkout_head(Some(&mut checkout))
+                .map_err(|source| GitError::Operation {
+                    operation: "restore working tree",
+                    source,
+                })?;
+        }
+        None => {
+            repo.set_head_detached(state.oid)
+                .map_err(|source| GitError::Operation {
+                    operation: "restore detached HEAD",
+                    source,
+                })?;
+            let commit = repo
+                .find_commit(state.oid)
+                .map_err(|source| GitError::Operation {
+                    operation: "resolve detached HEAD commit",
+                    source,
+                })?;
+            let mut checkout = CheckoutBuilder::new();
+            checkout.force().recreate_missing(true).update_index(true);
+            repo.checkout_tree(commit.as_object(), Some(&mut checkout))
+                .map_err(|source| GitError::Operation {
+                    operation: "checkout detached HEAD tree",
+                    source,
+                })?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn create_review_branch(
+    root: &Path,
+    branch_name: &str,
+    commit_hashes: &[String],
+) -> Result<FinalizedBranch> {
+    if commit_hashes.is_empty() {
+        bail!("cannot create a review branch without experiment commits");
+    }
+
+    let repo = require_repository(root)?;
+    let first_commit_oid = parse_oid(&commit_hashes[0])?;
+    let first_commit =
+        repo.find_commit(first_commit_oid)
+            .map_err(|source| GitError::Operation {
+                operation: "resolve experiment commit",
+                source,
+            })?;
+    let base_commit = first_commit
+        .parent(0)
+        .map_err(|source| GitError::Operation {
+            operation: "resolve experiment parent commit",
+            source,
+        })?;
+
+    match repo.find_branch(branch_name, BranchType::Local) {
+        Ok(_) => bail!("branch `{branch_name}` already exists"),
+        Err(error) if error.code() == ErrorCode::NotFound => {}
+        Err(source) => {
+            return Err(GitError::Operation {
+                operation: "inspect existing branch",
+                source,
+            }
+            .into());
+        }
+    }
+
+    let branch = repo
+        .branch(branch_name, &base_commit, false)
+        .map_err(|source| GitError::Operation {
+            operation: "create review branch",
+            source,
+        })?;
+    let branch_ref = branch
+        .get()
+        .name()
+        .ok_or_else(|| anyhow!("review branch name is not valid UTF-8"))?
+        .to_string();
+
+    repo.set_head(&branch_ref)
+        .map_err(|source| GitError::Operation {
+            operation: "checkout review branch HEAD",
+            source,
+        })?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force().recreate_missing(true).update_index(true);
+    repo.checkout_head(Some(&mut checkout))
+        .map_err(|source| GitError::Operation {
+            operation: "checkout review branch",
+            source,
+        })?;
+
+    let mut applied_commits = Vec::new();
+    for commit_hash in commit_hashes {
+        applied_commits.push(cherry_pick_commit_to_head(&repo, commit_hash)?);
+    }
+
+    let head_commit = repo
+        .head()
+        .map_err(|source| GitError::Operation {
+            operation: "read review branch HEAD",
+            source,
+        })?
+        .target()
+        .ok_or_else(|| anyhow!("review branch HEAD does not point to a commit"))?
+        .to_string();
+
+    Ok(FinalizedBranch {
+        branch_name: branch_name.to_string(),
+        base_commit: base_commit.id().to_string(),
+        head_commit,
+        applied_commits,
     })
 }
 
@@ -275,6 +439,16 @@ fn discover_repository(root: &Path) -> Result<Option<Repository>> {
     }
 }
 
+fn parse_oid(value: &str) -> Result<Oid> {
+    Oid::from_str(value).map_err(|source| {
+        GitError::Operation {
+            operation: "parse git object id",
+            source,
+        }
+        .into()
+    })
+}
+
 fn require_repository(root: &Path) -> Result<Repository> {
     discover_repository(root)?.ok_or_else(|| anyhow!("git operations require a git repository"))
 }
@@ -394,6 +568,77 @@ fn signature_for(repo: &Repository) -> Result<Signature<'static>> {
             }
             .into()
         })
+}
+
+fn cherry_pick_commit_to_head(repo: &Repository, commit_hash: &str) -> Result<String> {
+    let oid = parse_oid(commit_hash)?;
+    let commit = repo
+        .find_commit(oid)
+        .map_err(|source| GitError::Operation {
+            operation: "resolve cherry-pick commit",
+            source,
+        })?;
+    repo.cherrypick(&commit, None)
+        .map_err(|source| GitError::Operation {
+            operation: "cherry-pick commit",
+            source,
+        })?;
+
+    let mut index = repo.index().map_err(|source| GitError::Operation {
+        operation: "open git index",
+        source,
+    })?;
+    if index.has_conflicts() {
+        let _ = repo.cleanup_state();
+        bail!("cherry-pick for commit `{commit_hash}` produced conflicts");
+    }
+
+    let tree_id = index
+        .write_tree_to(repo)
+        .map_err(|source| GitError::Operation {
+            operation: "write cherry-pick tree",
+            source,
+        })?;
+    let tree = repo
+        .find_tree(tree_id)
+        .map_err(|source| GitError::Operation {
+            operation: "find cherry-pick tree",
+            source,
+        })?;
+    let head_commit = repo
+        .head()
+        .map_err(|source| GitError::Operation {
+            operation: "read HEAD reference",
+            source,
+        })?
+        .peel_to_commit()
+        .map_err(|source| GitError::Operation {
+            operation: "resolve HEAD commit",
+            source,
+        })?;
+    let author = commit.author();
+    let committer = signature_for(repo)?;
+    let message = commit.message().unwrap_or("autoloop finalize");
+
+    let new_commit = repo
+        .commit(
+            Some("HEAD"),
+            &author,
+            &committer,
+            message,
+            &tree,
+            &[&head_commit],
+        )
+        .map_err(|source| GitError::Operation {
+            operation: "commit cherry-pick result",
+            source,
+        })?;
+    repo.cleanup_state().map_err(|source| GitError::Operation {
+        operation: "cleanup cherry-pick state",
+        source,
+    })?;
+
+    Ok(new_commit.to_string())
 }
 
 fn remove_relative_path(workdir: &Path, relative_path: &str) -> Result<()> {
