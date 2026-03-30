@@ -120,8 +120,16 @@ impl Spinner {
         }
     }
 
-    pub fn finish(self) {
-        if let Some(progress) = self.progress {
+    pub fn finish(mut self) {
+        if let Some(progress) = self.progress.take() {
+            progress.finish_and_clear();
+        }
+    }
+}
+
+impl Drop for Spinner {
+    fn drop(&mut self) {
+        if let Some(progress) = self.progress.take() {
             progress.finish_and_clear();
         }
     }

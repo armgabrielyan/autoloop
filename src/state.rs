@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::config::autoloop_dir;
+use crate::config::{GuardrailKind, autoloop_dir};
 
 pub const STATE_FILE: &str = "state.json";
 pub const LAST_EVAL_FILE: &str = "last_eval.json";
@@ -19,6 +19,8 @@ pub struct State {
     pub schema_version: u32,
     pub active_session: Option<SessionState>,
     pub baseline: Option<MetricSnapshot>,
+    #[serde(default)]
+    pub baseline_guardrails: Vec<GuardrailBaseline>,
     pub next_experiment_id: u64,
 }
 
@@ -28,6 +30,7 @@ impl Default for State {
             schema_version: SCHEMA_VERSION,
             active_session: None,
             baseline: None,
+            baseline_guardrails: Vec::new(),
             next_experiment_id: 1,
         }
     }
@@ -71,14 +74,51 @@ impl Default for LastEvalState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingEval {
-    pub metric_name: String,
-    pub metric_value: f64,
+    pub metric: MetricSnapshot,
+    pub delta_from_baseline: f64,
     #[serde(default)]
-    pub unit: Option<String>,
+    pub confidence: Option<f64>,
     pub verdict: EvalVerdict,
-    pub captured_at: DateTime<Utc>,
+    pub command: CommandCapture,
+    #[serde(default)]
+    pub guardrails: Vec<GuardrailOutcome>,
     #[serde(default)]
     pub diff_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuardrailBaseline {
+    pub name: String,
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuardrailOutcome {
+    pub name: String,
+    pub kind: GuardrailKind,
+    pub passed: bool,
+    #[serde(default)]
+    pub value: Option<f64>,
+    #[serde(default)]
+    pub baseline: Option<f64>,
+    #[serde(default)]
+    pub threshold: Option<String>,
+    #[serde(default)]
+    pub details: Option<String>,
+    pub command: CommandCapture,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandCapture {
+    pub command: String,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub timed_out: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
