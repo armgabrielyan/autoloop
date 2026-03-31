@@ -29,6 +29,11 @@ fn install_codex_creates_agents_and_skills() {
     );
     assert!(
         temp.path()
+            .join(".agents/skills/autoloop-doctor/SKILL.md")
+            .exists()
+    );
+    assert!(
+        temp.path()
             .join(".agents/skills/autoloop-run/agents/openai.yaml")
             .exists()
     );
@@ -48,6 +53,11 @@ fn install_claude_and_generic_create_expected_files() {
     assert!(
         temp.path()
             .join(".claude/commands/autoloop-run.md")
+            .exists()
+    );
+    assert!(
+        temp.path()
+            .join(".claude/commands/autoloop-doctor.md")
             .exists()
     );
 

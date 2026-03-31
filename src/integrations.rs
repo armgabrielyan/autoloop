@@ -29,6 +29,11 @@ const ACTIONS: &[ActionSpec] = &[
         shared_body: include_str!("../integrations/_shared/baseline.md"),
     },
     ActionSpec {
+        name: "autoloop-doctor",
+        description: "Use when the user wants to verify or repair `.autoloop/config.toml`.",
+        shared_body: include_str!("../integrations/_shared/doctor.md"),
+    },
+    ActionSpec {
         name: "autoloop-run",
         description: "Use when the user wants an autonomous bounded autoloop optimization run.",
         shared_body: include_str!("../integrations/_shared/run.md"),
@@ -173,7 +178,7 @@ fn generate_generic(workspace_root: &Path) -> Vec<GeneratedFile> {
 
 fn render_context(filename: &str, workspace_root: &Path) -> String {
     format!(
-        "# Autoloop\n\nThis workspace uses the local `autoloop` CLI as the source of truth for autonomous experiment loops.\n\n## Workspace root\n\n{}/\n\n## Installed context\n\n- This file: `{}`\n- State lives under `.autoloop/`\n- Prefer `autoloop` CLI output with `--json` when a structured decision is needed\n- The installed names like `autoloop-run` and `autoloop-init` are agent wrappers, not native `autoloop` CLI subcommands\n\n## Primary workflow\n\n- `autoloop-init` bootstraps autoloop in the repo and prepares `.autoloop/config.toml`.\n- `autoloop-baseline` records the baseline metric once config is ready.\n- `autoloop-run` is the main autonomous loop entrypoint.\n- `autoloop-status` reports current or historical progress.\n- `autoloop-learn` refreshes `.autoloop/learnings.md`.\n- `autoloop-finalize` creates review branches from committed kept experiments.\n\n## Rules\n\n- Treat `autoloop-run` as permission to initialize autoloop, repair config, record a baseline, run a bounded loop, end the session, and refresh learnings.\n- Default bounded runs to 5 experiments when the user does not provide a different limit.\n- Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n- Let `autoloop` own experiment bookkeeping, eval verdicts, keep/discard state, and finalize branches.\n- Ask the user only when blocked by missing information, unsafe ambiguity, or a genuine external dependency.\n",
+        "# Autoloop\n\nThis workspace uses the local `autoloop` CLI as the source of truth for autonomous experiment loops.\n\n## Workspace root\n\n{}/\n\n## Installed context\n\n- This file: `{}`\n- State lives under `.autoloop/`\n- Prefer `autoloop` CLI output with `--json` when a structured decision is needed\n- The installed names like `autoloop-run` and `autoloop-init` are agent wrappers, not native `autoloop` CLI subcommands\n\n## Primary workflow\n\n- `autoloop-init` bootstraps autoloop in the repo and prepares `.autoloop/config.toml`.\n- `autoloop-doctor` verifies or repairs `.autoloop/config.toml` when setup is incomplete or broken.\n- `autoloop-baseline` records the baseline metric once config is healthy.\n- `autoloop-run` is the main autonomous loop entrypoint.\n- `autoloop-status` reports current or historical progress.\n- `autoloop-learn` refreshes `.autoloop/learnings.md`.\n- `autoloop-finalize` creates review branches from committed kept experiments.\n\n## Rules\n\n- Treat `autoloop-run` as permission to initialize autoloop, verify and repair config, record a baseline, run a bounded loop, end the session, and refresh learnings.\n- Default bounded runs to 5 experiments when the user does not provide a different limit.\n- Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n- Let `autoloop` own experiment bookkeeping, eval verdicts, keep/discard state, and finalize branches.\n- Ask the user only when blocked by missing information, unsafe ambiguity, or a genuine external dependency.\n",
         workspace_root.display(),
         filename
     )
@@ -284,6 +289,7 @@ mod tests {
         assert!(out.join("AGENTS.md").exists());
         assert!(out.join(".agents/skills/autoloop-run/SKILL.md").exists());
         assert!(out.join(".agents/skills/autoloop-init/SKILL.md").exists());
+        assert!(out.join(".agents/skills/autoloop-doctor/SKILL.md").exists());
         assert!(
             out.join(".agents/skills/autoloop-run/agents/openai.yaml")
                 .exists()
@@ -291,6 +297,7 @@ mod tests {
 
         let context = read(&out.join("AGENTS.md"));
         assert!(context.contains("autoloop-run"));
+        assert!(context.contains("autoloop-doctor"));
         assert!(context.contains(&out.display().to_string()));
         assert!(context.contains("agent wrappers, not native `autoloop` CLI subcommands"));
     }
@@ -304,11 +311,12 @@ mod tests {
         assert_eq!(context_path_for_tool(InstallTool::ClaudeCode), "CLAUDE.md");
         assert!(out.join("CLAUDE.md").exists());
         assert!(out.join(".claude/commands/autoloop-run.md").exists());
+        assert!(out.join(".claude/commands/autoloop-doctor.md").exists());
         assert!(out.join(".claude/commands/autoloop-finalize.md").exists());
 
         let command = read(&out.join(".claude/commands/autoloop-run.md"));
-        assert!(command.contains("autoloop session end"));
-        assert!(command.contains("autoloop keep --description"));
+        assert!(command.contains("autoloop doctor --json"));
+        assert!(command.contains("autoloop doctor --fix --json"));
         assert!(command.contains("default to 5 experiments"));
     }
 
@@ -350,6 +358,7 @@ mod tests {
 
         let program = read(&out.join("program.md"));
         assert!(program.contains("## Autoloop Run"));
+        assert!(program.contains("## Autoloop Doctor"));
         assert!(program.contains("autoloop-finalize"));
         assert!(program.contains("## What Helped"));
     }
