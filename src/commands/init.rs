@@ -205,7 +205,9 @@ fn render_source(source: ConfigSource) -> &'static str {
 fn render_project_kind(kind: ProjectKind) -> &'static str {
     match kind {
         ProjectKind::Rust => "rust",
+        ProjectKind::Go => "go",
         ProjectKind::DotNet => ".net",
+        ProjectKind::Jvm => "jvm",
         ProjectKind::Python => "python",
         ProjectKind::Node => "node",
         ProjectKind::Unknown => "unknown",

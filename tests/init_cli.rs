@@ -302,6 +302,112 @@ fn init_infers_dotnet_workspace_commands() {
     assert!(config.contains("command = \"dotnet test Demo.sln\""));
 }
 
+#[test]
+fn init_infers_go_workspace_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    fs::write(
+        temp.path().join("go.mod"),
+        "module example.com/demo\n\ngo 1.22\n",
+    )
+    .expect("go.mod should write");
+    fs::create_dir_all(temp.path().join("cmd/bench")).expect("bench dir should exist");
+    fs::write(
+        temp.path().join("cmd/bench/main.go"),
+        r#"package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("METRIC latency_p95=6.4")
+}
+"#,
+    )
+    .expect("bench file should write");
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "go");
+    assert_eq!(
+        payload["config_inference"]["eval_command"],
+        "go run ./cmd/bench"
+    );
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "go test ./..."
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"go run ./cmd/bench\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("command = \"go test ./...\""));
+}
+
+#[test]
+fn init_infers_jvm_workspace_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    fs::write(temp.path().join("gradlew"), "#!/usr/bin/env sh\n").expect("gradlew should write");
+    fs::write(
+        temp.path().join("build.gradle.kts"),
+        r#"tasks.register("bench") {
+    doLast {
+        println("bench")
+    }
+}
+"#,
+    )
+    .expect("build file should write");
+    fs::create_dir_all(temp.path().join("src/main/kotlin")).expect("source dir should exist");
+    fs::write(
+        temp.path().join("src/main/kotlin/Bench.kt"),
+        r#"fun main() {
+    println("METRIC latency_p95=4.2")
+}
+"#,
+    )
+    .expect("source file should write");
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "jvm");
+    assert_eq!(
+        payload["config_inference"]["eval_command"],
+        "./gradlew bench"
+    );
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "./gradlew test"
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"./gradlew bench\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("command = \"./gradlew test\""));
+}
+
 fn fixture_root(relative: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
 }

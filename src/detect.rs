@@ -22,7 +22,9 @@ pub enum ConfigSource {
 #[serde(rename_all = "snake_case")]
 pub enum ProjectKind {
     Rust,
+    Go,
     DotNet,
+    Jvm,
     Python,
     Node,
     Unknown,
@@ -46,6 +48,7 @@ struct EvalCandidate {
     command: String,
     metric_name: Option<String>,
     format: MetricFormat,
+    regex: Option<String>,
     note: String,
 }
 
@@ -61,6 +64,12 @@ struct NodeWorkspace {
     runner: NodeRunner,
     package_json: Option<JsonValue>,
     package_json_text: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct JvmWorkspace {
+    tool: JvmBuildTool,
+    build_texts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -80,10 +89,30 @@ enum NodeRunner {
     Bun,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum JvmBuildTool {
+    GradleWrapper,
+    Gradle,
+    MavenWrapper,
+    Maven,
+}
+
 pub fn infer_config(root: &Path) -> Result<(Config, ConfigInference)> {
     let project_kind = detect_project_kind(root);
     let mut notes = Vec::new();
     let (eval, guardrail) = match project_kind {
+        ProjectKind::Go => {
+            notes.push("Detected Go module; using `go` CLI commands.".to_string());
+            (detect_go_eval(root), detect_go_guardrail(root))
+        }
+        ProjectKind::Jvm => {
+            let workspace = inspect_jvm_workspace(root);
+            notes.push(workspace.tool.note().to_string());
+            (
+                detect_jvm_eval(root, &workspace),
+                detect_jvm_guardrail(&workspace),
+            )
+        }
         ProjectKind::Node => {
             let workspace = inspect_node_workspace(root);
             notes.push(workspace.runner.note().to_string());
@@ -114,6 +143,7 @@ pub fn infer_config(root: &Path) -> Result<(Config, ConfigInference)> {
     if let Some(candidate) = &eval {
         config.eval.command = candidate.command.clone();
         config.eval.format = candidate.format;
+        config.eval.regex = candidate.regex.clone();
         config.metric.name = candidate
             .metric_name
             .clone()
@@ -172,10 +202,14 @@ fn detect_project_kind(root: &Path) -> ProjectKind {
         ProjectKind::Node
     } else if root.join("pyproject.toml").exists() || has_extension(root, "py") {
         ProjectKind::Python
+    } else if root.join("go.mod").exists() {
+        ProjectKind::Go
     } else if has_matching_file(root, 2, &[".git", ".autoloop"], |name| {
         name.ends_with(".sln") || name.ends_with(".csproj")
     }) {
         ProjectKind::DotNet
+    } else if is_jvm_workspace(root) {
+        ProjectKind::Jvm
     } else {
         ProjectKind::Unknown
     }
@@ -187,7 +221,12 @@ fn detect_eval_candidate(root: &Path, project_kind: ProjectKind) -> Option<EvalC
             let workspace = inspect_python_workspace(root);
             detect_python_eval(root, &workspace)
         }),
+        ProjectKind::Go => detect_go_eval(root),
         ProjectKind::DotNet => detect_dotnet_eval(root),
+        ProjectKind::Jvm => {
+            let workspace = inspect_jvm_workspace(root);
+            detect_jvm_eval(root, &workspace)
+        }
         ProjectKind::Python => {
             let workspace = inspect_python_workspace(root);
             detect_python_eval(root, &workspace)
@@ -203,7 +242,16 @@ fn detect_eval_candidate(root: &Path, project_kind: ProjectKind) -> Option<EvalC
             let workspace = inspect_python_workspace(root);
             detect_python_eval(root, &workspace)
                 .or_else(|| detect_rust_eval(root))
+                .or_else(|| detect_go_eval(root))
                 .or_else(|| detect_dotnet_eval(root))
+                .or_else(|| {
+                    if is_jvm_workspace(root) {
+                        let workspace = inspect_jvm_workspace(root);
+                        detect_jvm_eval(root, &workspace)
+                    } else {
+                        None
+                    }
+                })
         }
     }
 }
@@ -214,7 +262,12 @@ fn detect_guardrail(root: &Path, project_kind: ProjectKind) -> Option<String> {
             .join("Cargo.toml")
             .exists()
             .then(|| "cargo test".to_string()),
+        ProjectKind::Go => detect_go_guardrail(root),
         ProjectKind::DotNet => detect_dotnet_guardrail(root),
+        ProjectKind::Jvm => {
+            let workspace = inspect_jvm_workspace(root);
+            detect_jvm_guardrail(&workspace)
+        }
         ProjectKind::Python => {
             let workspace = inspect_python_workspace(root);
             detect_python_guardrail(root, &workspace)
@@ -225,7 +278,17 @@ fn detect_guardrail(root: &Path, project_kind: ProjectKind) -> Option<String> {
         }
         ProjectKind::Unknown => {
             let workspace = inspect_python_workspace(root);
-            detect_python_guardrail(root, &workspace).or_else(|| detect_dotnet_guardrail(root))
+            detect_python_guardrail(root, &workspace)
+                .or_else(|| detect_go_guardrail(root))
+                .or_else(|| detect_dotnet_guardrail(root))
+                .or_else(|| {
+                    if is_jvm_workspace(root) {
+                        let workspace = inspect_jvm_workspace(root);
+                        detect_jvm_guardrail(&workspace)
+                    } else {
+                        None
+                    }
+                })
         }
     }
 }
@@ -252,6 +315,7 @@ fn detect_python_eval(root: &Path, workspace: &PythonWorkspace) -> Option<EvalCa
             command: workspace.runner.python_module_command(&module, &[]),
             metric_name: metric_name_from_python_module(root, &module),
             format: MetricFormat::MetricLines,
+            regex: None,
             note: format!(
                 "Detected Python eval entrypoint `{script_name}` from `pyproject.toml` using `{}`",
                 workspace.runner.label()
@@ -285,6 +349,7 @@ fn detect_python_eval(root: &Path, workspace: &PythonWorkspace) -> Option<EvalCa
                 .python_script_command(&normalize_relative_path(&relative)),
             metric_name: metric_name_from_file(&path),
             format: MetricFormat::MetricLines,
+            regex: None,
             note: format!(
                 "Detected Python eval command from `{relative}` using `{}`",
                 workspace.runner.label()
@@ -308,10 +373,189 @@ fn detect_rust_eval(root: &Path) -> Option<EvalCandidate> {
             command: format!("cargo run --quiet --bin {bin_name}"),
             metric_name,
             format: MetricFormat::MetricLines,
+            regex: None,
             note: format!("Detected Rust eval binary from `{relative}`"),
         });
     }
     None
+}
+
+fn detect_go_eval(root: &Path) -> Option<EvalCandidate> {
+    for relative in [
+        "cmd/bench/main.go",
+        "cmd/benchmark/main.go",
+        "cmd/eval/main.go",
+        "cmd/perf/main.go",
+        "bench/main.go",
+        "benchmark/main.go",
+        "eval/main.go",
+        "perf/main.go",
+    ] {
+        let path = root.join(relative);
+        if !path.exists() {
+            continue;
+        }
+        let package_path = relative
+            .strip_suffix("/main.go")
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| normalize_relative_path(relative));
+        let metric_name = metric_name_from_file(&path).or_else(|| {
+            path.parent()
+                .and_then(|directory| metric_name_from_directory(directory, &["go"]))
+        });
+        return Some(EvalCandidate {
+            command: format!("go run ./{package_path}"),
+            metric_name,
+            format: MetricFormat::MetricLines,
+            regex: None,
+            note: format!("Detected Go eval package `./{package_path}`"),
+        });
+    }
+
+    for relative in ["bench.go", "benchmark.go", "eval.go", "perf.go"] {
+        let path = root.join(relative);
+        if !path.exists() {
+            continue;
+        }
+        return Some(EvalCandidate {
+            command: format!("go run ./{relative}"),
+            metric_name: metric_name_from_file(&path),
+            format: MetricFormat::MetricLines,
+            regex: None,
+            note: format!("Detected Go eval file `{relative}`"),
+        });
+    }
+
+    if has_go_benchmark_tests(root) {
+        return Some(EvalCandidate {
+            command: "go test ./... -bench . -run ^$".to_string(),
+            metric_name: Some("ns_per_op".to_string()),
+            format: MetricFormat::Regex,
+            regex: Some(
+                r"(?m)^Benchmark\S+\s+\d+\s+([0-9]+(?:\.[0-9]+)?)\s+ns/op(?:\s|$)".to_string(),
+            ),
+            note: "Detected Go benchmark tests; using `go test -bench` output.".to_string(),
+        });
+    }
+
+    None
+}
+
+fn detect_go_guardrail(root: &Path) -> Option<String> {
+    root.join("go.mod")
+        .exists()
+        .then(|| "go test ./...".to_string())
+}
+
+fn has_go_benchmark_tests(root: &Path) -> bool {
+    find_matching_file(
+        root,
+        4,
+        &[
+            ".git",
+            ".autoloop",
+            "vendor",
+            "node_modules",
+            "target",
+            "bin",
+            "dist",
+        ],
+        |name| name.ends_with("_test.go"),
+    )
+    .map(|path| {
+        fs::read_to_string(path)
+            .ok()
+            .map(|content| {
+                Regex::new(r"(?m)^func\s+Benchmark[A-Za-z0-9_]+\s*\(")
+                    .ok()
+                    .map(|pattern| pattern.is_match(&content))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    })
+    .unwrap_or(false)
+}
+
+fn is_jvm_workspace(root: &Path) -> bool {
+    root.join("gradlew").exists()
+        || root.join("build.gradle").exists()
+        || root.join("build.gradle.kts").exists()
+        || root.join("settings.gradle").exists()
+        || root.join("settings.gradle.kts").exists()
+        || root.join("mvnw").exists()
+        || root.join("pom.xml").exists()
+}
+
+fn inspect_jvm_workspace(root: &Path) -> JvmWorkspace {
+    let tool = if root.join("gradlew").exists() {
+        JvmBuildTool::GradleWrapper
+    } else if root.join("build.gradle").exists() || root.join("build.gradle.kts").exists() {
+        JvmBuildTool::Gradle
+    } else if root.join("mvnw").exists() {
+        JvmBuildTool::MavenWrapper
+    } else {
+        JvmBuildTool::Maven
+    };
+    let build_texts = [
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "pom.xml",
+    ]
+    .iter()
+    .filter_map(|relative| fs::read_to_string(root.join(relative)).ok())
+    .collect();
+    JvmWorkspace { tool, build_texts }
+}
+
+fn detect_jvm_eval(root: &Path, workspace: &JvmWorkspace) -> Option<EvalCandidate> {
+    if workspace.tool.is_gradle() {
+        if let Some(task) = detect_gradle_task(
+            &workspace.build_texts,
+            &["bench", "benchmark", "eval", "perf"],
+        ) {
+            let metric_name = metric_name_from_directory(root, &["java", "kt", "kts", "groovy"]);
+            return Some(EvalCandidate {
+                command: workspace.tool.gradle_task_command(&task),
+                format: if metric_name.is_some() {
+                    MetricFormat::MetricLines
+                } else {
+                    MetricFormat::Auto
+                },
+                metric_name,
+                regex: None,
+                note: format!("Detected Gradle eval task `{task}`"),
+            });
+        }
+        if jvm_texts_mention(&workspace.build_texts, "jmh") {
+            let metric_name = jvm_benchmark_metric_name(&workspace.build_texts);
+            return Some(EvalCandidate {
+                command: workspace.tool.gradle_task_command("jmh"),
+                metric_name: Some(metric_name),
+                format: MetricFormat::Regex,
+                regex: Some(jvm_benchmark_regex().to_string()),
+                note: "Detected Gradle JMH configuration; using `jmh` task output.".to_string(),
+            });
+        }
+        return None;
+    }
+
+    if jvm_texts_mention(&workspace.build_texts, "jmh") {
+        return Some(EvalCandidate {
+            command: workspace.tool.maven_goal_command("jmh:benchmark"),
+            metric_name: Some(jvm_benchmark_metric_name(&workspace.build_texts)),
+            format: MetricFormat::Regex,
+            regex: Some(jvm_benchmark_regex().to_string()),
+            note: "Detected Maven JMH configuration; using `jmh:benchmark` output.".to_string(),
+        });
+    }
+
+    None
+}
+
+fn detect_jvm_guardrail(workspace: &JvmWorkspace) -> Option<String> {
+    Some(workspace.tool.test_command())
 }
 
 fn inspect_node_workspace(root: &Path) -> NodeWorkspace {
@@ -334,6 +578,7 @@ fn detect_node_eval(root: &Path, workspace: &NodeWorkspace) -> Option<EvalCandid
             command: workspace.runner.run_script_command(&script),
             metric_name: metric_name_from_package_script(root, workspace, &script),
             format: MetricFormat::Auto,
+            regex: None,
             note: format!(
                 "Detected {} eval script `{script}`",
                 workspace.runner.label()
@@ -385,6 +630,7 @@ fn detect_node_eval(root: &Path, workspace: &NodeWorkspace) -> Option<EvalCandid
             command,
             metric_name: metric_name_from_file(&path),
             format: MetricFormat::MetricLines,
+            regex: None,
             note: format!(
                 "Detected {} eval file `{relative}`",
                 workspace.runner.label()
@@ -462,6 +708,7 @@ fn detect_dotnet_eval(root: &Path) -> Option<EvalCandidate> {
             command: format!("dotnet run --project {relative}"),
             metric_name,
             format: MetricFormat::MetricLines,
+            regex: None,
             note: format!("Detected .NET eval project `{relative}`"),
         }
     })
@@ -576,7 +823,7 @@ fn metric_name_from_python_module(root: &Path, module: &str) -> Option<String> {
 
 fn infer_direction(metric_name: &str) -> MetricDirection {
     let lower = [
-        "latency", "time", "duration", "memory", "size", "error", "fail",
+        "latency", "time", "duration", "memory", "size", "error", "fail", "_per_op",
     ];
     if lower.iter().any(|needle| metric_name.contains(needle)) {
         MetricDirection::Lower
@@ -586,11 +833,17 @@ fn infer_direction(metric_name: &str) -> MetricDirection {
 }
 
 fn infer_unit(metric_name: &str) -> Option<String> {
-    let milliseconds = ["latency", "time", "duration"];
-    milliseconds
-        .iter()
-        .any(|needle| metric_name.contains(needle))
-        .then(|| "ms".to_string())
+    if metric_name.contains("ns_per_op") {
+        Some("ns/op".to_string())
+    } else if metric_name.contains("throughput") {
+        Some("ops/s".to_string())
+    } else {
+        let milliseconds = ["latency", "time", "duration"];
+        milliseconds
+            .iter()
+            .any(|needle| metric_name.contains(needle))
+            .then(|| "ms".to_string())
+    }
 }
 
 fn has_extension(root: &Path, extension: &str) -> bool {
@@ -702,6 +955,48 @@ impl NodeRunner {
     }
 }
 
+impl JvmBuildTool {
+    fn note(self) -> &'static str {
+        match self {
+            Self::GradleWrapper => {
+                "Detected Gradle JVM workspace; using the local `./gradlew` wrapper."
+            }
+            Self::Gradle => "Detected Gradle JVM workspace; using `gradle` commands.",
+            Self::MavenWrapper => "Detected Maven JVM workspace; using the local `./mvnw` wrapper.",
+            Self::Maven => "Detected Maven JVM workspace; using `mvn` commands.",
+        }
+    }
+
+    fn is_gradle(self) -> bool {
+        matches!(self, Self::GradleWrapper | Self::Gradle)
+    }
+
+    fn gradle_task_command(self, task: &str) -> String {
+        match self {
+            Self::GradleWrapper => format!("./gradlew {task}"),
+            Self::Gradle => format!("gradle {task}"),
+            Self::MavenWrapper | Self::Maven => task.to_string(),
+        }
+    }
+
+    fn maven_goal_command(self, goal: &str) -> String {
+        match self {
+            Self::MavenWrapper => format!("./mvnw -q {goal}"),
+            Self::Maven => format!("mvn -q {goal}"),
+            Self::GradleWrapper | Self::Gradle => goal.to_string(),
+        }
+    }
+
+    fn test_command(self) -> String {
+        match self {
+            Self::GradleWrapper => "./gradlew test".to_string(),
+            Self::Gradle => "gradle test".to_string(),
+            Self::MavenWrapper => "./mvnw test".to_string(),
+            Self::Maven => "mvn test".to_string(),
+        }
+    }
+}
+
 impl PythonRunner {
     fn label(self) -> &'static str {
         match self {
@@ -787,6 +1082,53 @@ fn detect_node_runner(root: &Path, package_json: Option<&JsonValue>) -> NodeRunn
     } else {
         NodeRunner::Npm
     }
+}
+
+fn detect_gradle_task(build_texts: &[String], names: &[&str]) -> Option<String> {
+    let joined = build_texts.join("\n");
+    for name in names {
+        let escaped = regex::escape(name);
+        let patterns = [
+            format!(r#"tasks\.register\(\s*["']{escaped}["']"#),
+            format!(r#"task\s+{escaped}\b"#),
+            format!(r#"tasks\.named\(\s*["']{escaped}["']"#),
+            format!(r#"["']{escaped}["']\s*\{{"#),
+        ];
+        if patterns.iter().any(|pattern| {
+            Regex::new(pattern)
+                .ok()
+                .map(|regex| regex.is_match(&joined))
+                .unwrap_or(false)
+        }) {
+            return Some((*name).to_string());
+        }
+    }
+    None
+}
+
+fn jvm_texts_mention(build_texts: &[String], needle: &str) -> bool {
+    let needle = needle.to_ascii_lowercase();
+    build_texts
+        .iter()
+        .any(|text| text.to_ascii_lowercase().contains(&needle))
+}
+
+fn jvm_benchmark_metric_name(build_texts: &[String]) -> String {
+    let joined = build_texts.join("\n").to_ascii_lowercase();
+    if joined.contains("averagetime") || joined.contains("mode.avgt") || joined.contains("avgt") {
+        "time_per_op".to_string()
+    } else if joined.contains("throughput")
+        || joined.contains("mode.thrpt")
+        || joined.contains("thrpt")
+    {
+        "throughput".to_string()
+    } else {
+        "benchmark_score".to_string()
+    }
+}
+
+fn jvm_benchmark_regex() -> &'static str {
+    r"(?m)^Benchmark\S*(?:\s+\S+)*\s+(?:thrpt|avgt|sample|ss)\s+\d+\s+([0-9]+(?:\.[0-9]+)?)\s+(?:±\s+[0-9]+(?:\.[0-9]+)?\s+)?\S+"
 }
 
 fn detect_python_pyproject_script(
@@ -1031,7 +1373,8 @@ fn metric_name_from_directory(directory: &Path, extensions: &[&str]) -> Option<S
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigSource, ProjectKind, infer_config};
+    use super::{ConfigSource, ProjectKind, infer_config, jvm_benchmark_regex};
+    use crate::eval::formats::MetricFormat;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1261,6 +1604,117 @@ bench = "demo.bench:main"
                 .iter()
                 .any(|note| note.contains(".NET workspace"))
         );
+    }
+
+    #[test]
+    fn infers_go_workspace_from_cmd_bench() {
+        let root = temp_dir("go-cmd-bench");
+        write(&root.join("go.mod"), "module example.com/demo\n\ngo 1.22\n");
+        write(
+            &root.join("cmd/bench/main.go"),
+            r#"package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("METRIC latency_p95=6.4")
+}
+"#,
+        );
+
+        let (_, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Go));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "go run ./cmd/bench");
+        assert_eq!(inference.metric_name, "latency_p95");
+        assert_eq!(inference.guardrail_commands, vec!["go test ./..."]);
+    }
+
+    #[test]
+    fn infers_go_benchmark_tests_with_regex_fallback() {
+        let root = temp_dir("go-bench-tests");
+        write(&root.join("go.mod"), "module example.com/demo\n\ngo 1.22\n");
+        write(
+            &root.join("bench_test.go"),
+            r#"package demo
+
+import "testing"
+
+func BenchmarkSearch(b *testing.B) {}
+"#,
+        );
+
+        let (config, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Go));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "go test ./... -bench . -run ^$");
+        assert_eq!(inference.metric_name, "ns_per_op");
+        assert_eq!(inference.guardrail_commands, vec!["go test ./..."]);
+        assert!(matches!(config.eval.format, MetricFormat::Regex));
+        assert_eq!(
+            config.eval.regex.as_deref(),
+            Some(r"(?m)^Benchmark\S+\s+\d+\s+([0-9]+(?:\.[0-9]+)?)\s+ns/op(?:\s|$)")
+        );
+    }
+
+    #[test]
+    fn infers_gradle_jvm_workspace() {
+        let root = temp_dir("gradle-jvm");
+        write(&root.join("gradlew"), "#!/usr/bin/env sh\n");
+        write(
+            &root.join("build.gradle.kts"),
+            r#"tasks.register("bench") {
+    doLast {
+        println("bench")
+    }
+}
+"#,
+        );
+        write(
+            &root.join("src/main/kotlin/Bench.kt"),
+            r#"fun main() {
+    println("METRIC latency_p95=4.2")
+}
+"#,
+        );
+
+        let (_, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Jvm));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "./gradlew bench");
+        assert_eq!(inference.metric_name, "latency_p95");
+        assert_eq!(inference.guardrail_commands, vec!["./gradlew test"]);
+    }
+
+    #[test]
+    fn infers_maven_jmh_workspace() {
+        let root = temp_dir("maven-jmh");
+        write(&root.join("mvnw"), "#!/usr/bin/env sh\n");
+        write(
+            &root.join("pom.xml"),
+            r#"<project>
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>jmh-maven-plugin</artifactId>
+        <configuration>
+          <mode>thrpt</mode>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"#,
+        );
+
+        let (config, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Jvm));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "./mvnw -q jmh:benchmark");
+        assert_eq!(inference.metric_name, "throughput");
+        assert_eq!(inference.guardrail_commands, vec!["./mvnw test"]);
+        assert!(matches!(config.eval.format, MetricFormat::Regex));
+        assert_eq!(config.eval.regex.as_deref(), Some(jvm_benchmark_regex()));
     }
 
     fn temp_dir(label: &str) -> PathBuf {
