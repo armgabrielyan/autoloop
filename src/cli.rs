@@ -1,4 +1,6 @@
-use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputFormat {
@@ -34,6 +36,7 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Init(InitArgs),
+    Install(InstallArgs),
     Baseline(BaselineArgs),
     Session(SessionArgs),
     Pre(PreArgs),
@@ -52,6 +55,42 @@ pub struct InitArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum InstallTool {
+    #[value(name = "claude-code")]
+    ClaudeCode,
+    Codex,
+    Cursor,
+    Opencode,
+    #[value(name = "gemini-cli")]
+    GeminiCli,
+    Generic,
+}
+
+impl InstallTool {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+            Self::Cursor => "cursor",
+            Self::Opencode => "opencode",
+            Self::GeminiCli => "gemini-cli",
+            Self::Generic => "generic",
+        }
+    }
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct InstallArgs {
+    pub tool: InstallTool,
+
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Debug, Args, Clone, Default)]

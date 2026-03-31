@@ -6,6 +6,7 @@ pub mod eval;
 pub mod experiments;
 pub mod finalize;
 pub mod git;
+pub mod integrations;
 pub mod output;
 pub mod shell;
 pub mod state;

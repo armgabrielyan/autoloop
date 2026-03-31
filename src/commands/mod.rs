@@ -3,6 +3,7 @@ mod discard;
 mod eval;
 mod finalize;
 mod init;
+mod install;
 mod keep;
 mod learn;
 mod pre;
@@ -16,6 +17,7 @@ use crate::cli::{CliCommand, OutputFormat, SessionAction};
 pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
     match command {
         CliCommand::Init(args) => init::run(args, output),
+        CliCommand::Install(args) => install::run(args, output),
         CliCommand::Baseline(args) => baseline::run(args, output),
         CliCommand::Session(args) => match args.action {
             SessionAction::Start(start_args) => session::start(start_args, output),
