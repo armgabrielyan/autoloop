@@ -60,6 +60,36 @@ You should see passing tests and a metric line like:
 METRIC latency_p95=123.456
 ```
 
+## Rust Follow-Up
+
+After the Python fixture passes, repeat the same setup path with the Rust fixture:
+
+```bash
+cp -R examples/smoke-rust-cli /tmp/autoloop-rust-smoke
+cd /tmp/autoloop-rust-smoke
+git init
+git add .
+git commit -m "initial rust smoke fixture"
+autoloop install codex
+autoloop init --verify
+autoloop doctor --json
+autoloop baseline
+```
+
+For the Rust fixture, the expected verified setup is:
+
+- eval command: `cargo run --quiet --bin bench`
+- metric name: `latency_p95`
+- metric direction: `lower`
+- pass/fail guardrail: `cargo test`
+
+The baseline sanity check for this fixture is:
+
+```bash
+cargo test
+cargo run --quiet --bin bench
+```
+
 ## Prompt To Use
 
 ### Codex
@@ -87,6 +117,7 @@ In a successful run, the agent should:
    - `latency_p95` as the primary metric
    - `lower` as the direction
    - `python3 -m unittest` as a pass/fail guardrail
+   - or, for the Rust fixture, `cargo run --quiet --bin bench` plus `cargo test`
 4. If the config is still the template or otherwise broken, run `autoloop doctor --fix` before continuing.
 5. Record a baseline only after doctor reports a healthy config.
 6. Run a bounded experiment loop.
