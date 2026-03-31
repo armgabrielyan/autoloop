@@ -13,6 +13,7 @@ pub mod shell;
 pub mod state;
 pub mod tags;
 pub mod ui;
+pub mod validation;
 
 use anyhow::Result;
 use clap::Parser;

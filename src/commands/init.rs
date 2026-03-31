@@ -14,6 +14,7 @@ use crate::ui::{
     Spinner, TableRow, Tone, banner, can_prompt, confirm, join_blocks, render_list, render_steps,
     render_table,
 };
+use crate::validation::{ValidationReport, validate_config};
 
 pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
     let root = std::env::current_dir().context("failed to resolve current directory")?;
@@ -83,6 +84,8 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
             "updated": updated,
             "root": root.display().to_string(),
             "config_inference": &inference,
+            "verification": serde_json::Value::Null,
+            "verification_skipped": args.verify,
         });
         let human = render_summary(
             Tone::Warning,
@@ -93,6 +96,8 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
             &display_path(&root, &state_path),
             &display_path(&root, &last_eval_path),
             &inference,
+            None,
+            args.verify,
             &created,
             &updated,
         );
@@ -118,22 +123,47 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
     }
     spinner.finish();
 
+    let verification = if args.verify {
+        let spinner = Spinner::new("Verifying inferred config");
+        let report = validate_config(&root, &inferred_config);
+        spinner.finish();
+        Some(report)
+    } else {
+        None
+    };
+    let verification_healthy = verification
+        .as_ref()
+        .map(|report| report.healthy)
+        .unwrap_or(true);
+
     let payload = json!({
         "dry_run": false,
         "created": created,
         "updated": updated,
         "root": root.display().to_string(),
         "config_inference": &inference,
+        "verification": &verification,
+        "verification_skipped": false,
     });
     let human = render_summary(
-        Tone::Success,
-        "Initialized autoloop",
+        if verification_healthy {
+            Tone::Success
+        } else {
+            Tone::Warning
+        },
+        if verification_healthy {
+            "Initialized autoloop"
+        } else {
+            "Initialized autoloop (verification needs attention)"
+        },
         &root.display().to_string(),
         &display_path(&root, &dir),
         &display_path(&root, &config),
         &display_path(&root, &state_path),
         &display_path(&root, &last_eval_path),
         &inference,
+        verification.as_ref(),
+        false,
         &created,
         &updated,
     );
@@ -149,6 +179,8 @@ fn render_summary(
     state_path: &str,
     last_eval_path: &str,
     inference: &ConfigInference,
+    verification: Option<&ValidationReport>,
+    verification_skipped: bool,
     created: &[String],
     updated: &[String],
 ) -> String {
@@ -173,6 +205,10 @@ fn render_summary(
         ),
         TableRow::new("Eval command", inference.eval_command.clone()),
         TableRow::new("Guardrails", guardrails),
+        TableRow::new(
+            "Verified",
+            render_verification_status(verification, verification_skipped),
+        ),
         TableRow::new("State", state_path),
         TableRow::new("Pending eval", last_eval_path),
     ]);
@@ -187,7 +223,13 @@ fn render_summary(
     if let Some(notes_block) = render_list("Inference", &inference.notes) {
         blocks.push(notes_block);
     }
-    if let Some(next_block) = render_steps("Next", &next_steps(inference)) {
+    if let Some(verification_block) = render_list(
+        "Verification",
+        &render_verification_lines(verification, verification_skipped),
+    ) {
+        blocks.push(verification_block);
+    }
+    if let Some(next_block) = render_steps("Next", &next_steps(inference, verification)) {
         blocks.push(next_block);
     }
 
@@ -229,7 +271,16 @@ fn render_metric(
     }
 }
 
-fn next_steps(inference: &ConfigInference) -> Vec<String> {
+fn next_steps(inference: &ConfigInference, verification: Option<&ValidationReport>) -> Vec<String> {
+    if matches!(verification, Some(report) if !report.healthy) {
+        return vec![
+            "Run `autoloop doctor --fix` to apply a verified inferred config when available."
+                .to_string(),
+            "If repair is not available, edit `.autoloop/config.toml` and rerun `autoloop doctor`."
+                .to_string(),
+        ];
+    }
+
     let mut steps = vec!["Run `autoloop status` to inspect the initialized workspace".to_string()];
     match inference.source {
         ConfigSource::Inferred => {
@@ -245,6 +296,61 @@ fn next_steps(inference: &ConfigInference) -> Vec<String> {
         }
     }
     steps
+}
+
+fn render_verification_status(
+    verification: Option<&ValidationReport>,
+    verification_skipped: bool,
+) -> String {
+    if verification_skipped {
+        "skipped (dry-run)".to_string()
+    } else {
+        match verification {
+            Some(report) if report.healthy => "yes".to_string(),
+            Some(_) => "no".to_string(),
+            None => "not run".to_string(),
+        }
+    }
+}
+
+fn render_verification_lines(
+    verification: Option<&ValidationReport>,
+    verification_skipped: bool,
+) -> Vec<String> {
+    if verification_skipped {
+        return vec!["Verification is skipped during `--dry-run`.".to_string()];
+    }
+    let Some(verification) = verification else {
+        return Vec::new();
+    };
+
+    let mut lines = vec![format!(
+        "eval: {}",
+        if verification.eval.is_pass() {
+            verification.eval.message.clone()
+        } else {
+            format!("FAIL {}", verification.eval.message)
+        }
+    )];
+    lines.extend(verification.guardrails.iter().map(|guardrail| {
+        format!(
+            "{}: {}",
+            guardrail.name,
+            if guardrail.is_pass() {
+                guardrail.message.clone()
+            } else {
+                format!("FAIL {}", guardrail.message)
+            }
+        )
+    }));
+    lines.extend(verification.warnings.clone());
+    if !verification.healthy {
+        lines.push(
+            "Run `autoloop doctor --fix` or edit `.autoloop/config.toml` before baselining."
+                .to_string(),
+        );
+    }
+    lines
 }
 
 fn display_path(root: &Path, path: &Path) -> String {

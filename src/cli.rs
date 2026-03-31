@@ -36,6 +36,7 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     Init(InitArgs),
+    Doctor(DoctorArgs),
     Install(InstallArgs),
     Baseline(BaselineArgs),
     Session(SessionArgs),
@@ -55,6 +56,15 @@ pub struct InitArgs {
 
     #[arg(long)]
     pub dry_run: bool,
+
+    #[arg(long)]
+    pub verify: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub struct DoctorArgs {
+    #[arg(long)]
+    pub fix: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

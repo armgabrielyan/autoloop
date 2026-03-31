@@ -1,5 +1,6 @@
 mod baseline;
 mod discard;
+mod doctor;
 mod eval;
 mod finalize;
 mod init;
@@ -17,6 +18,7 @@ use crate::cli::{CliCommand, OutputFormat, SessionAction};
 pub fn dispatch(command: CliCommand, output: OutputFormat) -> Result<()> {
     match command {
         CliCommand::Init(args) => init::run(args, output),
+        CliCommand::Doctor(args) => doctor::run(args, output),
         CliCommand::Install(args) => install::run(args, output),
         CliCommand::Baseline(args) => baseline::run(args, output),
         CliCommand::Session(args) => match args.action {
