@@ -5,7 +5,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::json;
 
 use crate::cli::{InitArgs, OutputFormat};
-use crate::config::{autoloop_dir, config_path, default_config_template};
+use crate::config::{autoloop_dir, config_path, render_config};
+use crate::detect::{ConfigInference, ConfigSource, ProjectKind, infer_config};
 use crate::git::{ensure_gitignore_contains, gitignore_path};
 use crate::output::emit;
 use crate::state::{LastEvalState, State, write_learnings_stub, write_session_markdown};
@@ -23,6 +24,8 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
     let learnings_path = crate::state::learnings_path(&root);
     let session_md_path = crate::state::session_markdown_path(&root);
     let gitignore_path = gitignore_path(&root)?;
+    let (inferred_config, inference) = infer_config(&root)?;
+    let rendered_config = render_config(&inferred_config)?;
 
     let overwrite_existing = if config.exists() && !args.force {
         if can_prompt() {
@@ -79,6 +82,7 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
             "created": created,
             "updated": updated,
             "root": root.display().to_string(),
+            "config_inference": &inference,
         });
         let human = render_summary(
             Tone::Warning,
@@ -88,6 +92,7 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
             &display_path(&root, &config),
             &display_path(&root, &state_path),
             &display_path(&root, &last_eval_path),
+            &inference,
             &created,
             &updated,
         );
@@ -96,7 +101,7 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
 
     let spinner = Spinner::new("Initializing autoloop workspace");
     fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
-    fs::write(&config, default_config_template())
+    fs::write(&config, rendered_config)
         .with_context(|| format!("failed to write {}", config.display()))?;
 
     let state = State::default();
@@ -118,6 +123,7 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
         "created": created,
         "updated": updated,
         "root": root.display().to_string(),
+        "config_inference": &inference,
     });
     let human = render_summary(
         Tone::Success,
@@ -127,6 +133,7 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
         &display_path(&root, &config),
         &display_path(&root, &state_path),
         &display_path(&root, &last_eval_path),
+        &inference,
         &created,
         &updated,
     );
@@ -141,13 +148,31 @@ fn render_summary(
     config: &str,
     state_path: &str,
     last_eval_path: &str,
+    inference: &ConfigInference,
     created: &[String],
     updated: &[String],
 ) -> String {
+    let guardrails = if inference.guardrail_commands.is_empty() {
+        "none detected".to_string()
+    } else {
+        inference.guardrail_commands.join(", ")
+    };
     let table = render_table(&[
         TableRow::new("Workspace", root),
         TableRow::new("Autoloop dir", dir),
         TableRow::new("Config", config),
+        TableRow::new("Config source", render_source(inference.source)),
+        TableRow::new("Project", render_project_kind(inference.project_kind)),
+        TableRow::new(
+            "Metric",
+            render_metric(
+                &inference.metric_name,
+                inference.metric_direction,
+                inference.metric_unit.as_deref(),
+            ),
+        ),
+        TableRow::new("Eval command", inference.eval_command.clone()),
+        TableRow::new("Guardrails", guardrails),
         TableRow::new("State", state_path),
         TableRow::new("Pending eval", last_eval_path),
     ]);
@@ -159,18 +184,64 @@ fn render_summary(
     if let Some(updated_block) = render_list("Updated", updated) {
         blocks.push(updated_block);
     }
-    if let Some(next_block) = render_steps(
-        "Next",
-        &[
-            "Run `autoloop status` to inspect the initialized workspace".to_string(),
-            "Run `autoloop session start --name \"first-run\"` before the first experiment"
-                .to_string(),
-        ],
-    ) {
+    if let Some(notes_block) = render_list("Inference", &inference.notes) {
+        blocks.push(notes_block);
+    }
+    if let Some(next_block) = render_steps("Next", &next_steps(inference)) {
         blocks.push(next_block);
     }
 
     join_blocks(blocks)
+}
+
+fn render_source(source: ConfigSource) -> &'static str {
+    match source {
+        ConfigSource::Inferred => "inferred",
+        ConfigSource::Partial => "partial",
+        ConfigSource::Template => "template",
+    }
+}
+
+fn render_project_kind(kind: ProjectKind) -> &'static str {
+    match kind {
+        ProjectKind::Rust => "rust",
+        ProjectKind::Python => "python",
+        ProjectKind::Node => "node",
+        ProjectKind::Unknown => "unknown",
+    }
+}
+
+fn render_metric(
+    name: &str,
+    direction: crate::config::MetricDirection,
+    unit: Option<&str>,
+) -> String {
+    let direction = match direction {
+        crate::config::MetricDirection::Lower => "lower",
+        crate::config::MetricDirection::Higher => "higher",
+    };
+    match unit {
+        Some(unit) => format!("{name} ({direction}, {unit})"),
+        None => format!("{name} ({direction})"),
+    }
+}
+
+fn next_steps(inference: &ConfigInference) -> Vec<String> {
+    let mut steps = vec!["Run `autoloop status` to inspect the initialized workspace".to_string()];
+    match inference.source {
+        ConfigSource::Inferred => {
+            steps.push("Run `autoloop baseline` to record the inferred benchmark".to_string());
+            steps.push(
+                "Run `autoloop session start --name \"first-run\"` after baseline succeeds"
+                    .to_string(),
+            );
+        }
+        ConfigSource::Partial | ConfigSource::Template => {
+            steps.push("Open `.autoloop/config.toml` and replace the placeholder eval command with a repo-specific metric command".to_string());
+            steps.push("Run `autoloop baseline` only after the config is executable".to_string());
+        }
+    }
+    steps
 }
 
 fn display_path(root: &Path, path: &Path) -> String {

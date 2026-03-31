@@ -148,6 +148,31 @@ impl Config {
     }
 }
 
+pub fn default_config() -> Config {
+    Config {
+        metric: MetricConfig {
+            name: "latency_p95".to_string(),
+            direction: MetricDirection::Lower,
+            unit: Some("ms".to_string()),
+        },
+        eval: EvalConfig {
+            command: "echo 'METRIC latency_p95=42.3'".to_string(),
+            timeout: default_eval_timeout(),
+            format: MetricFormat::MetricLines,
+            regex: None,
+            retries: default_eval_retries(),
+        },
+        guardrails: Vec::new(),
+        confidence: ConfidenceConfig::default(),
+        git: GitConfig::default(),
+        strictness: Strictness::default(),
+    }
+}
+
+pub fn render_config(config: &Config) -> Result<String> {
+    Ok(toml::to_string_pretty(config)?)
+}
+
 pub fn default_config_template() -> &'static str {
     r#"# autoloop v0 template
 strictness = "advisory"

@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod commands;
 pub mod config;
+pub mod detect;
 pub mod error;
 pub mod eval;
 pub mod experiments;

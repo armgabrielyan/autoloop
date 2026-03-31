@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 
 use assert_cmd::Command;
 use serde_json::Value;
@@ -110,4 +111,94 @@ fn session_start_error_is_styled() {
         plain.starts_with("error a session is already active; end it before starting a new one")
     );
     assert!(!plain.contains("Error:"));
+}
+
+#[test]
+fn init_infers_python_fixture_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    copy_dir_all(&fixture_root("examples/smoke-python-search"), temp.path());
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "python");
+    assert_eq!(
+        payload["config_inference"]["eval_command"],
+        "python3 bench.py"
+    );
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "python3 -m unittest"
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"python3 bench.py\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("kind = \"pass_fail\""));
+    assert!(config.contains("command = \"python3 -m unittest\""));
+}
+
+#[test]
+fn init_infers_rust_fixture_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    copy_dir_all(&fixture_root("examples/smoke-rust-cli"), temp.path());
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "rust");
+    assert_eq!(
+        payload["config_inference"]["eval_command"],
+        "cargo run --quiet --bin bench"
+    );
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "cargo test"
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"cargo run --quiet --bin bench\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("kind = \"pass_fail\""));
+    assert!(config.contains("command = \"cargo test\""));
+}
+
+fn fixture_root(relative: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("destination should exist");
+    for entry in fs::read_dir(source).expect("source dir should be readable") {
+        let entry = entry.expect("dir entry should be readable");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_all(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).expect("file should copy");
+        }
+    }
 }
