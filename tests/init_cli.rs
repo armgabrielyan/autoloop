@@ -185,6 +185,123 @@ fn init_infers_rust_fixture_commands() {
     assert!(config.contains("command = \"cargo test\""));
 }
 
+#[test]
+fn init_infers_bun_workspace_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    fs::write(temp.path().join("bun.lockb"), "").expect("lockfile should write");
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{
+  "name": "demo",
+  "scripts": {
+    "bench": "bun bench.ts",
+    "test": "bun test"
+  }
+}
+"#,
+    )
+    .expect("package.json should write");
+    fs::write(
+        temp.path().join("bench.ts"),
+        "console.log('METRIC latency_p95=18.4');\n",
+    )
+    .expect("bench file should write");
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "node");
+    assert_eq!(payload["config_inference"]["eval_command"], "bun run bench");
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "bun run test"
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"bun run bench\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("command = \"bun run test\""));
+}
+
+#[test]
+fn init_infers_dotnet_workspace_commands() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    fs::write(
+        temp.path().join("Demo.sln"),
+        "Microsoft Visual Studio Solution File, Format Version 12.00\n",
+    )
+    .expect("solution should write");
+    fs::create_dir_all(temp.path().join("Benchmarks")).expect("bench dir should exist");
+    fs::create_dir_all(temp.path().join("Demo.Tests")).expect("test dir should exist");
+    fs::write(
+        temp.path().join("Benchmarks/Benchmarks.csproj"),
+        r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"#,
+    )
+    .expect("bench csproj should write");
+    fs::write(
+        temp.path().join("Benchmarks/Program.cs"),
+        "Console.WriteLine(\"METRIC latency_p95=11.7\");\n",
+    )
+    .expect("program should write");
+    fs::write(
+        temp.path().join("Demo.Tests/Demo.Tests.csproj"),
+        r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+</Project>
+"#,
+    )
+    .expect("test csproj should write");
+
+    let output = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["init", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&output).expect("json output should parse");
+    assert_eq!(payload["config_inference"]["source"], "inferred");
+    assert_eq!(payload["config_inference"]["project_kind"], "dot_net");
+    assert_eq!(
+        payload["config_inference"]["eval_command"],
+        "dotnet run --project Benchmarks/Benchmarks.csproj"
+    );
+    assert_eq!(payload["config_inference"]["metric_name"], "latency_p95");
+    assert_eq!(
+        payload["config_inference"]["guardrail_commands"][0],
+        "dotnet test Demo.sln"
+    );
+
+    let config = fs::read_to_string(temp.path().join(".autoloop/config.toml"))
+        .expect("config should be readable");
+    assert!(config.contains("command = \"dotnet run --project Benchmarks/Benchmarks.csproj\""));
+    assert!(config.contains("name = \"latency_p95\""));
+    assert!(config.contains("command = \"dotnet test Demo.sln\""));
+}
+
 fn fixture_root(relative: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(relative)
 }

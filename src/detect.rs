@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use regex::Regex;
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
 use crate::config::{Config, GuardrailConfig, GuardrailKind, MetricDirection, default_config};
@@ -21,6 +22,7 @@ pub enum ConfigSource {
 #[serde(rename_all = "snake_case")]
 pub enum ProjectKind {
     Rust,
+    DotNet,
     Python,
     Node,
     Unknown,
@@ -54,6 +56,13 @@ struct PythonWorkspace {
     pyproject_text: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct NodeWorkspace {
+    runner: NodeRunner,
+    package_json: Option<JsonValue>,
+    package_json_text: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum PythonRunner {
     Direct,
@@ -63,10 +72,26 @@ enum PythonRunner {
     Hatch,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum NodeRunner {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
 pub fn infer_config(root: &Path) -> Result<(Config, ConfigInference)> {
     let project_kind = detect_project_kind(root);
     let mut notes = Vec::new();
     let (eval, guardrail) = match project_kind {
+        ProjectKind::Node => {
+            let workspace = inspect_node_workspace(root);
+            notes.push(workspace.runner.note().to_string());
+            (
+                detect_node_eval(root, &workspace),
+                detect_node_guardrail(root, &workspace),
+            )
+        }
         ProjectKind::Python => {
             let workspace = inspect_python_workspace(root);
             notes.push(workspace.runner.note().to_string());
@@ -74,6 +99,10 @@ pub fn infer_config(root: &Path) -> Result<(Config, ConfigInference)> {
                 detect_python_eval(root, &workspace),
                 detect_python_guardrail(root, &workspace),
             )
+        }
+        ProjectKind::DotNet => {
+            notes.push("Detected .NET workspace; using `dotnet` CLI commands.".to_string());
+            (detect_dotnet_eval(root), detect_dotnet_guardrail(root))
         }
         _ => (
             detect_eval_candidate(root, project_kind),
@@ -143,6 +172,10 @@ fn detect_project_kind(root: &Path) -> ProjectKind {
         ProjectKind::Node
     } else if root.join("pyproject.toml").exists() || has_extension(root, "py") {
         ProjectKind::Python
+    } else if has_matching_file(root, 2, &[".git", ".autoloop"], |name| {
+        name.ends_with(".sln") || name.ends_with(".csproj")
+    }) {
+        ProjectKind::DotNet
     } else {
         ProjectKind::Unknown
     }
@@ -154,17 +187,23 @@ fn detect_eval_candidate(root: &Path, project_kind: ProjectKind) -> Option<EvalC
             let workspace = inspect_python_workspace(root);
             detect_python_eval(root, &workspace)
         }),
+        ProjectKind::DotNet => detect_dotnet_eval(root),
         ProjectKind::Python => {
             let workspace = inspect_python_workspace(root);
             detect_python_eval(root, &workspace)
         }
-        ProjectKind::Node => detect_node_eval(root).or_else(|| {
-            let workspace = inspect_python_workspace(root);
-            detect_python_eval(root, &workspace)
-        }),
+        ProjectKind::Node => {
+            let workspace = inspect_node_workspace(root);
+            detect_node_eval(root, &workspace).or_else(|| {
+                let workspace = inspect_python_workspace(root);
+                detect_python_eval(root, &workspace)
+            })
+        }
         ProjectKind::Unknown => {
             let workspace = inspect_python_workspace(root);
-            detect_python_eval(root, &workspace).or_else(|| detect_rust_eval(root))
+            detect_python_eval(root, &workspace)
+                .or_else(|| detect_rust_eval(root))
+                .or_else(|| detect_dotnet_eval(root))
         }
     }
 }
@@ -175,14 +214,18 @@ fn detect_guardrail(root: &Path, project_kind: ProjectKind) -> Option<String> {
             .join("Cargo.toml")
             .exists()
             .then(|| "cargo test".to_string()),
+        ProjectKind::DotNet => detect_dotnet_guardrail(root),
         ProjectKind::Python => {
             let workspace = inspect_python_workspace(root);
             detect_python_guardrail(root, &workspace)
         }
-        ProjectKind::Node => detect_node_test(root),
+        ProjectKind::Node => {
+            let workspace = inspect_node_workspace(root);
+            detect_node_guardrail(root, &workspace)
+        }
         ProjectKind::Unknown => {
             let workspace = inspect_python_workspace(root);
-            detect_python_guardrail(root, &workspace)
+            detect_python_guardrail(root, &workspace).or_else(|| detect_dotnet_guardrail(root))
         }
     }
 }
@@ -271,28 +314,195 @@ fn detect_rust_eval(root: &Path) -> Option<EvalCandidate> {
     None
 }
 
-fn detect_node_eval(root: &Path) -> Option<EvalCandidate> {
-    detect_node_script(root, &["bench", "benchmark", "eval"]).map(|script| EvalCandidate {
-        command: format!("npm run {script}"),
-        metric_name: None,
-        format: MetricFormat::Auto,
-        note: format!("Detected npm eval script `{script}`"),
+fn inspect_node_workspace(root: &Path) -> NodeWorkspace {
+    let package_json_path = root.join("package.json");
+    let package_json_text = fs::read_to_string(&package_json_path).ok();
+    let package_json = package_json_text
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<JsonValue>(text).ok());
+    let runner = detect_node_runner(root, package_json.as_ref());
+    NodeWorkspace {
+        runner,
+        package_json,
+        package_json_text,
+    }
+}
+
+fn detect_node_eval(root: &Path, workspace: &NodeWorkspace) -> Option<EvalCandidate> {
+    if let Some(script) = detect_node_script(workspace, &["bench", "benchmark", "eval", "perf"]) {
+        return Some(EvalCandidate {
+            command: workspace.runner.run_script_command(&script),
+            metric_name: metric_name_from_package_script(root, workspace, &script),
+            format: MetricFormat::Auto,
+            note: format!(
+                "Detected {} eval script `{script}`",
+                workspace.runner.label()
+            ),
+        });
+    }
+
+    find_named_file(
+        root,
+        &[
+            "bench.js",
+            "benchmark.js",
+            "eval.js",
+            "bench.mjs",
+            "benchmark.mjs",
+            "eval.mjs",
+            "bench.cjs",
+            "benchmark.cjs",
+            "eval.cjs",
+            "bench.ts",
+            "benchmark.ts",
+            "eval.ts",
+            "bench.tsx",
+            "benchmark.tsx",
+            "eval.tsx",
+        ],
+        3,
+        &[
+            ".git",
+            ".autoloop",
+            "node_modules",
+            "dist",
+            "build",
+            ".next",
+            "coverage",
+        ],
+    )
+    .and_then(|path| {
+        let relative = path
+            .strip_prefix(root)
+            .ok()
+            .map(|value| value.display().to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        let command = workspace.runner.file_command(
+            &normalize_relative_path(&relative),
+            workspace.package_json.as_ref(),
+        )?;
+        Some(EvalCandidate {
+            command,
+            metric_name: metric_name_from_file(&path),
+            format: MetricFormat::MetricLines,
+            note: format!(
+                "Detected {} eval file `{relative}`",
+                workspace.runner.label()
+            ),
+        })
     })
 }
 
-fn detect_node_test(root: &Path) -> Option<String> {
-    detect_node_script(root, &["test"]).map(|script| format!("npm run {script}"))
+fn detect_node_guardrail(root: &Path, workspace: &NodeWorkspace) -> Option<String> {
+    if let Some(script) = detect_node_script(workspace, &["test", "check", "verify"]) {
+        return Some(workspace.runner.run_script_command(&script));
+    }
+    if workspace.runner.is_bun()
+        && (root.join("bunfig.toml").exists()
+            || has_matching_file(root, 3, &[".git", ".autoloop", "node_modules"], |name| {
+                name.ends_with(".test.ts")
+                    || name.ends_with(".test.js")
+                    || name.ends_with(".spec.ts")
+                    || name.ends_with(".spec.js")
+            }))
+    {
+        return Some("bun test".to_string());
+    }
+    if package_json_mentions_dependency(workspace.package_json_text.as_deref(), "vitest")
+        || has_matching_file(root, 2, &[".git", ".autoloop", "node_modules"], |name| {
+            name.starts_with("vitest.config.")
+        })
+    {
+        return Some(workspace.runner.exec_command("vitest", &["run"]));
+    }
+    if package_json_mentions_dependency(workspace.package_json_text.as_deref(), "jest")
+        || has_matching_file(root, 2, &[".git", ".autoloop", "node_modules"], |name| {
+            name.starts_with("jest.config.")
+        })
+    {
+        return Some(workspace.runner.exec_command("jest", &["--runInBand"]));
+    }
+    None
 }
 
-fn detect_node_script(root: &Path, names: &[&str]) -> Option<String> {
-    let path = root.join("package.json");
-    let content = fs::read_to_string(path).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let scripts = parsed.get("scripts")?.as_object()?;
+fn detect_node_script(workspace: &NodeWorkspace, names: &[&str]) -> Option<String> {
+    let scripts = workspace
+        .package_json
+        .as_ref()?
+        .get("scripts")?
+        .as_object()?;
     names
         .iter()
         .find(|name| scripts.contains_key(**name))
         .map(|name| (*name).to_string())
+}
+
+fn detect_dotnet_eval(root: &Path) -> Option<EvalCandidate> {
+    find_matching_file(
+        root,
+        3,
+        &[".git", ".autoloop", "bin", "obj", "node_modules"],
+        |name| {
+            name.ends_with(".csproj")
+                && (name.to_ascii_lowercase().contains("bench")
+                    || name.to_ascii_lowercase().contains("eval"))
+        },
+    )
+    .map(|path| {
+        let relative = path
+            .strip_prefix(root)
+            .ok()
+            .map(|value| normalize_relative_path(&value.display().to_string()))
+            .unwrap_or_else(|| normalize_relative_path(&path.display().to_string()));
+        let metric_name = path
+            .parent()
+            .and_then(|directory| metric_name_from_directory(directory, &["cs"]))
+            .or_else(|| metric_name_from_directory(root, &["cs"]));
+        EvalCandidate {
+            command: format!("dotnet run --project {relative}"),
+            metric_name,
+            format: MetricFormat::MetricLines,
+            note: format!("Detected .NET eval project `{relative}`"),
+        }
+    })
+}
+
+fn detect_dotnet_guardrail(root: &Path) -> Option<String> {
+    if let Some(solution) = find_matching_file(root, 2, &[".git", ".autoloop"], |name| {
+        name.ends_with(".sln")
+    }) {
+        let relative = solution
+            .strip_prefix(root)
+            .ok()
+            .map(|value| normalize_relative_path(&value.display().to_string()))
+            .unwrap_or_else(|| normalize_relative_path(&solution.display().to_string()));
+        return Some(format!("dotnet test {relative}"));
+    }
+
+    if let Some(test_project) = find_matching_file(
+        root,
+        3,
+        &[".git", ".autoloop", "bin", "obj", "node_modules"],
+        |name| {
+            let lower = name.to_ascii_lowercase();
+            lower.ends_with(".csproj") && (lower.contains("test") || lower.contains("tests"))
+        },
+    ) {
+        let relative = test_project
+            .strip_prefix(root)
+            .ok()
+            .map(|value| normalize_relative_path(&value.display().to_string()))
+            .unwrap_or_else(|| normalize_relative_path(&test_project.display().to_string()));
+        return Some(format!("dotnet test {relative}"));
+    }
+
+    has_matching_file(
+        root,
+        2,
+        &[".git", ".autoloop", "bin", "obj", "node_modules"],
+        |name| name.ends_with(".csproj"),
+    )
+    .then(|| "dotnet test".to_string())
 }
 
 fn detect_python_guardrail(root: &Path, workspace: &PythonWorkspace) -> Option<String> {
@@ -421,6 +631,77 @@ fn normalize_relative_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+impl NodeRunner {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Yarn => "yarn",
+            Self::Bun => "bun",
+        }
+    }
+
+    fn note(self) -> &'static str {
+        match self {
+            Self::Npm => "Detected npm-managed Node workspace; using `npm` commands.",
+            Self::Pnpm => "Detected pnpm-managed Node workspace; using `pnpm` commands.",
+            Self::Yarn => "Detected Yarn-managed Node workspace; using `yarn` commands.",
+            Self::Bun => "Detected Bun-managed Node workspace; using `bun` commands.",
+        }
+    }
+
+    fn run_script_command(self, script: &str) -> String {
+        match self {
+            Self::Npm => format!("npm run {script}"),
+            Self::Pnpm => format!("pnpm run {script}"),
+            Self::Yarn => format!("yarn {script}"),
+            Self::Bun => format!("bun run {script}"),
+        }
+    }
+
+    fn exec_command(self, binary: &str, args: &[&str]) -> String {
+        let suffix = if args.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", args.join(" "))
+        };
+        match self {
+            Self::Npm => format!("npm exec -- {binary}{suffix}"),
+            Self::Pnpm => format!("pnpm exec {binary}{suffix}"),
+            Self::Yarn => format!("yarn exec {binary}{suffix}"),
+            Self::Bun => format!("bun x {binary}{suffix}"),
+        }
+    }
+
+    fn file_command(self, path: &str, package_json: Option<&JsonValue>) -> Option<String> {
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|value| value.to_str())?;
+        match extension {
+            "js" | "mjs" | "cjs" => Some(match self {
+                Self::Bun => format!("bun {path}"),
+                _ => format!("node {path}"),
+            }),
+            "ts" | "tsx" => {
+                if self.is_bun() {
+                    Some(format!("bun {path}"))
+                } else if package_json_has_dependency(package_json, "tsx") {
+                    Some(self.exec_command("tsx", &[path]))
+                } else if package_json_has_dependency(package_json, "ts-node") {
+                    Some(self.exec_command("ts-node", &[path]))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn is_bun(self) -> bool {
+        matches!(self, Self::Bun)
+    }
+}
+
 impl PythonRunner {
     fn label(self) -> &'static str {
         match self {
@@ -483,6 +764,28 @@ fn detect_python_runner(root: &Path, pyproject: Option<&TomlValue>) -> PythonRun
         PythonRunner::Hatch
     } else {
         PythonRunner::Direct
+    }
+}
+
+fn detect_node_runner(root: &Path, package_json: Option<&JsonValue>) -> NodeRunner {
+    let package_manager = package_json
+        .and_then(|value| value.get("packageManager"))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if root.join("bun.lockb").exists()
+        || root.join("bun.lock").exists()
+        || root.join("bunfig.toml").exists()
+        || package_manager.starts_with("bun@")
+    {
+        NodeRunner::Bun
+    } else if root.join("pnpm-lock.yaml").exists() || package_manager.starts_with("pnpm@") {
+        NodeRunner::Pnpm
+    } else if root.join("yarn.lock").exists() || package_manager.starts_with("yarn@") {
+        NodeRunner::Yarn
+    } else {
+        NodeRunner::Npm
     }
 }
 
@@ -556,6 +859,68 @@ fn requirements_mention(root: &Path, dependency: &str) -> bool {
     })
 }
 
+fn package_json_mentions_dependency(content: Option<&str>, dependency: &str) -> bool {
+    content
+        .map(|text| {
+            let needle = format!("\"{}\"", dependency.to_ascii_lowercase());
+            text.to_ascii_lowercase().contains(&needle)
+        })
+        .unwrap_or(false)
+}
+
+fn package_json_has_dependency(package_json: Option<&JsonValue>, dependency: &str) -> bool {
+    let Some(package_json) = package_json else {
+        return false;
+    };
+    for table_name in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
+        if package_json
+            .get(table_name)
+            .and_then(|value| value.as_object())
+            .map(|table| table.contains_key(dependency))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn metric_name_from_package_script(
+    root: &Path,
+    workspace: &NodeWorkspace,
+    script: &str,
+) -> Option<String> {
+    let script_body = workspace
+        .package_json
+        .as_ref()?
+        .get("scripts")?
+        .as_object()?
+        .get(script)?
+        .as_str()?;
+    for token in script_body.split_whitespace() {
+        let token = token.trim_matches(|character| {
+            matches!(character, '"' | '\'' | ',' | ';' | '(' | ')' | '[' | ']')
+        });
+        if token.ends_with(".js")
+            || token.ends_with(".mjs")
+            || token.ends_with(".cjs")
+            || token.ends_with(".ts")
+            || token.ends_with(".tsx")
+        {
+            let candidate = root.join(token);
+            if candidate.exists() {
+                return metric_name_from_file(&candidate);
+            }
+        }
+    }
+    None
+}
+
 fn find_named_file(
     root: &Path,
     names: &[&str],
@@ -596,6 +961,72 @@ fn find_named_file_inner(
         }
     }
     None
+}
+
+fn has_matching_file(
+    root: &Path,
+    max_depth: usize,
+    ignored_dirs: &[&str],
+    predicate: impl Fn(&str) -> bool + Copy,
+) -> bool {
+    find_matching_file(root, max_depth, ignored_dirs, predicate).is_some()
+}
+
+fn find_matching_file(
+    root: &Path,
+    max_depth: usize,
+    ignored_dirs: &[&str],
+    predicate: impl Fn(&str) -> bool + Copy,
+) -> Option<PathBuf> {
+    find_matching_file_inner(root, root, max_depth, ignored_dirs, predicate)
+}
+
+fn find_matching_file_inner(
+    base: &Path,
+    current: &Path,
+    depth_remaining: usize,
+    ignored_dirs: &[&str],
+    predicate: impl Fn(&str) -> bool + Copy,
+) -> Option<PathBuf> {
+    let entries = fs::read_dir(current).ok()?;
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let path = entry.path();
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if path.is_dir() {
+            if depth_remaining == 0 || ignored_dirs.iter().any(|ignored| *ignored == file_name) {
+                continue;
+            }
+            if let Some(found) =
+                find_matching_file_inner(base, &path, depth_remaining - 1, ignored_dirs, predicate)
+            {
+                return Some(found);
+            }
+            continue;
+        }
+        if predicate(&file_name) {
+            return path
+                .strip_prefix(base)
+                .ok()
+                .map(|relative| base.join(relative));
+        }
+    }
+    None
+}
+
+fn metric_name_from_directory(directory: &Path, extensions: &[&str]) -> Option<String> {
+    find_matching_file(
+        directory,
+        2,
+        &[".git", ".autoloop", "node_modules", "target", "bin", "obj"],
+        |name| {
+            extensions.iter().any(|extension| {
+                name.to_ascii_lowercase()
+                    .ends_with(&format!(".{}", extension.to_ascii_lowercase()))
+            })
+        },
+    )
+    .and_then(|path| metric_name_from_file(&path))
 }
 
 #[cfg(test)]
@@ -712,6 +1143,124 @@ bench = "demo.bench:main"
         assert!(matches!(inference.source, ConfigSource::Partial));
         assert_eq!(inference.eval_command, "echo 'METRIC latency_p95=42.3'");
         assert_eq!(inference.guardrail_commands, vec!["python3 -m unittest"]);
+    }
+
+    #[test]
+    fn infers_bun_workspace_with_scripts() {
+        let root = temp_dir("bun-scripts");
+        write(&root.join("bun.lockb"), "");
+        write(
+            &root.join("package.json"),
+            r#"{
+  "name": "demo",
+  "scripts": {
+    "bench": "bun bench.ts",
+    "test": "bun test"
+  }
+}
+"#,
+        );
+        write(
+            &root.join("bench.ts"),
+            "console.log('METRIC latency_p95=18.4');\n",
+        );
+
+        let (_, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Node));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "bun run bench");
+        assert_eq!(inference.metric_name, "latency_p95");
+        assert_eq!(inference.guardrail_commands, vec!["bun run test"]);
+        assert!(
+            inference
+                .notes
+                .iter()
+                .any(|note| note.contains("Bun-managed"))
+        );
+    }
+
+    #[test]
+    fn infers_pnpm_workspace_with_vitest_and_tsx() {
+        let root = temp_dir("pnpm-vitest");
+        write(&root.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+        write(
+            &root.join("package.json"),
+            r#"{
+  "name": "demo",
+  "packageManager": "pnpm@9.0.0",
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "vitest": "^2.0.0"
+  }
+}
+"#,
+        );
+        write(
+            &root.join("bench.ts"),
+            "console.log('METRIC latency_p95=9.2');\n",
+        );
+
+        let (_, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::Node));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(inference.eval_command, "pnpm exec tsx bench.ts");
+        assert_eq!(inference.metric_name, "latency_p95");
+        assert_eq!(inference.guardrail_commands, vec!["pnpm exec vitest run"]);
+        assert!(
+            inference
+                .notes
+                .iter()
+                .any(|note| note.contains("pnpm-managed"))
+        );
+    }
+
+    #[test]
+    fn infers_dotnet_workspace() {
+        let root = temp_dir("dotnet");
+        write(
+            &root.join("Demo.sln"),
+            "Microsoft Visual Studio Solution File, Format Version 12.00\n",
+        );
+        write(
+            &root.join("Benchmarks/Benchmarks.csproj"),
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+"#,
+        );
+        write(
+            &root.join("Benchmarks/Program.cs"),
+            "Console.WriteLine(\"METRIC latency_p95=11.7\");\n",
+        );
+        write(
+            &root.join("Demo.Tests/Demo.Tests.csproj"),
+            r#"<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+</Project>
+"#,
+        );
+
+        let (_, inference) = infer_config(&root).expect("inference should succeed");
+        assert!(matches!(inference.project_kind, ProjectKind::DotNet));
+        assert!(matches!(inference.source, ConfigSource::Inferred));
+        assert_eq!(
+            inference.eval_command,
+            "dotnet run --project Benchmarks/Benchmarks.csproj"
+        );
+        assert_eq!(inference.metric_name, "latency_p95");
+        assert_eq!(inference.guardrail_commands, vec!["dotnet test Demo.sln"]);
+        assert!(
+            inference
+                .notes
+                .iter()
+                .any(|note| note.contains(".NET workspace"))
+        );
     }
 
     fn temp_dir(label: &str) -> PathBuf {
