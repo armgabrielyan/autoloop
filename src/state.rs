@@ -195,7 +195,7 @@ pub fn write_learnings_stub(root: &Path) -> Result<()> {
 
     fs::write(
         &path,
-        "# Learnings\n\n## What Works\n\n## What Doesn't Work\n",
+        "# Learnings\n\n## What Helped\n\n## What Failed\n\n## Watchouts\n\n## Next Ideas\n",
     )
     .with_context(|| format!("failed to write {}", path.display()))
 }

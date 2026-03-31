@@ -173,7 +173,7 @@ fn generate_generic(workspace_root: &Path) -> Vec<GeneratedFile> {
 
 fn render_context(filename: &str, workspace_root: &Path) -> String {
     format!(
-        "# Autoloop\n\nThis workspace uses the local `autoloop` CLI as the source of truth for autonomous experiment loops.\n\n## Workspace root\n\n{}/\n\n## Installed context\n\n- This file: `{}`\n- State lives under `.autoloop/`\n- Prefer `autoloop` CLI output with `--json` when a structured decision is needed\n\n## Primary workflow\n\n- `autoloop-init` bootstraps autoloop in the repo and prepares `.autoloop/config.toml`.\n- `autoloop-baseline` records the baseline metric once config is ready.\n- `autoloop-run` is the main autonomous loop entrypoint.\n- `autoloop-status` reports current or historical progress.\n- `autoloop-learn` refreshes `.autoloop/learnings.md`.\n- `autoloop-finalize` creates review branches from committed kept experiments.\n\n## Rules\n\n- Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n- Let `autoloop` own experiment bookkeeping, eval verdicts, keep/discard state, and finalize branches.\n- When running autonomous loops, keep them bounded by experiment count or time unless the user explicitly requests otherwise.\n- Ask the user only when blocked by missing information, unsafe ambiguity, or a genuine external dependency.\n",
+        "# Autoloop\n\nThis workspace uses the local `autoloop` CLI as the source of truth for autonomous experiment loops.\n\n## Workspace root\n\n{}/\n\n## Installed context\n\n- This file: `{}`\n- State lives under `.autoloop/`\n- Prefer `autoloop` CLI output with `--json` when a structured decision is needed\n- The installed names like `autoloop-run` and `autoloop-init` are agent wrappers, not native `autoloop` CLI subcommands\n\n## Primary workflow\n\n- `autoloop-init` bootstraps autoloop in the repo and prepares `.autoloop/config.toml`.\n- `autoloop-baseline` records the baseline metric once config is ready.\n- `autoloop-run` is the main autonomous loop entrypoint.\n- `autoloop-status` reports current or historical progress.\n- `autoloop-learn` refreshes `.autoloop/learnings.md`.\n- `autoloop-finalize` creates review branches from committed kept experiments.\n\n## Rules\n\n- Treat `autoloop-run` as permission to initialize autoloop, repair config, record a baseline, run a bounded loop, end the session, and refresh learnings.\n- Default bounded runs to 5 experiments when the user does not provide a different limit.\n- Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n- Let `autoloop` own experiment bookkeeping, eval verdicts, keep/discard state, and finalize branches.\n- Ask the user only when blocked by missing information, unsafe ambiguity, or a genuine external dependency.\n",
         workspace_root.display(),
         filename
     )
@@ -220,7 +220,7 @@ fn render_claude_command(action: &ActionSpec) -> String {
 
 fn render_skill_body(action: &ActionSpec) -> String {
     format!(
-        "Use the local `autoloop` CLI as the source of truth for this workflow action.\n\n## Required action\n\n1. Work from the current workspace root.\n2. Use `autoloop` commands, preferring `--json` when structured output is needed.\n3. Return important CLI output faithfully.\n4. Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n5. If the `autoloop` executable is unavailable, stop and tell the user to install or build it.\n\n## Shared contract reference\n\n{}\n",
+        "Use the local `autoloop` CLI as the source of truth for this workflow action.\n\nThese installed names are agent wrappers, not native `autoloop` CLI subcommands. A wrapper may call multiple `autoloop` commands and edit normal project files under the hood.\n\n## Required action\n\n1. Work from the current workspace root.\n2. Use `autoloop` commands, preferring `--json` when structured output is needed.\n3. Return important CLI output faithfully.\n4. Do not manually edit `.autoloop/state.json`, `.autoloop/last_eval.json`, or `.autoloop/experiments.jsonl`.\n5. If the `autoloop` executable is unavailable, stop and tell the user to install or build it.\n\n## Shared contract reference\n\n{}\n",
         action.shared_body.trim()
     )
 }
@@ -292,6 +292,7 @@ mod tests {
         let context = read(&out.join("AGENTS.md"));
         assert!(context.contains("autoloop-run"));
         assert!(context.contains(&out.display().to_string()));
+        assert!(context.contains("agent wrappers, not native `autoloop` CLI subcommands"));
     }
 
     #[test]
@@ -308,6 +309,7 @@ mod tests {
         let command = read(&out.join(".claude/commands/autoloop-run.md"));
         assert!(command.contains("autoloop session end"));
         assert!(command.contains("autoloop keep --description"));
+        assert!(command.contains("default to 5 experiments"));
     }
 
     #[test]
@@ -349,5 +351,6 @@ mod tests {
         let program = read(&out.join("program.md"));
         assert!(program.contains("## Autoloop Run"));
         assert!(program.contains("autoloop-finalize"));
+        assert!(program.contains("## What Helped"));
     }
 }

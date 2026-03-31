@@ -2,6 +2,8 @@
 
 Use [smoke-python-search](../../examples/smoke-python-search/README.md) as the first end-to-end integration test. It is intentionally small, deterministic, and easy for an agent to reason about.
 
+Once that works, use [smoke-rust-cli](../../examples/smoke-rust-cli/README.md) as the second test. It exercises the same loop with Cargo-native setup and commands.
+
 ## Why This Example
 
 It exercises the actual promised workflow:
@@ -12,6 +14,15 @@ It exercises the actual promised workflow:
 - one clear correctness guardrail
 - several obvious small optimizations
 - bounded autonomous loop with minimal user interaction
+
+## Fixture Order
+
+Use the fixtures in this order:
+
+1. `examples/smoke-python-search`
+2. `examples/smoke-rust-cli`
+
+The first validates the basic autonomous loop with a tiny Python benchmark. The second validates that the integration can infer a real Cargo-based eval command and guardrail without switching to a different workflow model.
 
 ## Setup
 
@@ -113,3 +124,22 @@ git log --oneline --decorate --graph --all
 - It keeps large risky changes without strong metric evidence.
 - It never ends the session or never updates learnings.
 - It asks the user what to do between every experiment.
+
+## Acceptance Checklist
+
+Use this as the pass/fail checklist for an installed integration run:
+
+- [ ] The agent used the installed wrapper or command surface, not an ad hoc manual workflow.
+- [ ] `.autoloop/` was initialized automatically when missing.
+- [ ] `.autoloop/config.toml` was adapted to the real repo and is not still the template.
+- [ ] The inferred eval command actually runs in the repo.
+- [ ] The inferred guardrail command actually runs in the repo.
+- [ ] `autoloop baseline` succeeded before the experiment loop started.
+- [ ] The run stayed bounded and did not require user input between normal experiments.
+- [ ] Each experiment was small and attributable.
+- [ ] Every `autoloop eval` result was resolved with keep or discard instead of being left pending.
+- [ ] At least one experiment was recorded in `.autoloop/experiments.jsonl`.
+- [ ] `autoloop session end` happened before the run finished.
+- [ ] `.autoloop/learnings.md` was updated with concrete evidence-backed notes.
+- [ ] The repo's correctness command still passes after the run.
+- [ ] The final benchmark metric improved, or the agent gave a credible explanation for why no safe improvement was found.
