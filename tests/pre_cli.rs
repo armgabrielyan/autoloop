@@ -174,6 +174,13 @@ fn pre_prefers_working_tree_tags_when_changes_are_present() {
 
 fn init_git_repo(temp: &TempDir) {
     let repo = Repository::init(temp.path()).expect("git repo should initialize");
+    let mut config = repo.config().expect("git config should open");
+    config
+        .set_bool("core.autocrlf", false)
+        .expect("git autocrlf should disable");
+    config
+        .set_str("core.eol", "lf")
+        .expect("git eol should pin to lf");
     fs::write(temp.path().join("tracked.txt"), "hello\n").expect("tracked file should write");
 
     let mut index = repo.index().expect("git index should open");

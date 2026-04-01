@@ -307,7 +307,7 @@ fn keep_commit_only_includes_recorded_experiment_paths() {
     init_workspace(&temp);
     fs::write(temp.path().join("metric.txt"), "METRIC latency_p95=50\n")
         .expect("metric file should write");
-    write_config(&temp, &config("advisory", "cat metric.txt"));
+    write_config(&temp, &config("advisory", &read_file_command("metric.txt")));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -447,6 +447,13 @@ fn discard_refuses_when_worktree_drifted() {
 
 fn init_git_repo(temp: &TempDir) {
     let repo = Repository::init(temp.path()).expect("git repo should initialize");
+    let mut config = repo.config().expect("git config should open");
+    config
+        .set_bool("core.autocrlf", false)
+        .expect("git autocrlf should disable");
+    config
+        .set_str("core.eol", "lf")
+        .expect("git eol should pin to lf");
     fs::write(temp.path().join("tracked.txt"), "hello\n").expect("tracked file should write");
 
     let mut index = repo.index().expect("git index should open");
@@ -511,6 +518,14 @@ fn init_workspace(temp: &TempDir) {
 
 fn write_config(temp: &TempDir, content: &str) {
     fs::write(temp.path().join(".autoloop/config.toml"), content).expect("config should write");
+}
+
+fn read_file_command(path: &str) -> String {
+    if cfg!(windows) {
+        format!("type {path}")
+    } else {
+        format!("cat {path}")
+    }
 }
 
 fn config(strictness: &str, eval_command: &str) -> String {
