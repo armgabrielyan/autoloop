@@ -1,3 +1,5 @@
+use std::fs;
+
 use anyhow::{Context, Result, bail};
 use serde_json::json;
 
@@ -20,6 +22,10 @@ pub fn run(args: LearnArgs, output: OutputFormat) -> Result<()> {
     let scope = resolve_scope(&root, &state, &args)?;
     let records = summarize_records(&root)?;
     let report = learn_report(&root, scope.session_id.as_deref(), config.metric.direction)?;
+    let learnings_path = learnings_path(&root);
+    let learnings_markdown = render_learnings_markdown(&scope, &report);
+    fs::write(&learnings_path, learnings_markdown)
+        .with_context(|| format!("failed to write {}", learnings_path.display()))?;
 
     let payload = json!({
         "scope": {
@@ -27,7 +33,7 @@ pub fn run(args: LearnArgs, output: OutputFormat) -> Result<()> {
             "session_id": scope.session_id,
             "label": scope.label,
         },
-        "learnings_path": learnings_path(&root),
+        "learnings_path": learnings_path,
         "records": records,
         "report": report,
     });
@@ -49,6 +55,7 @@ pub fn run(args: LearnArgs, output: OutputFormat) -> Result<()> {
                 "Best improvement",
                 render_best_improvement(report.summary.best_improvement.as_ref()),
             ),
+            TableRow::new("Learnings file", learnings_path.display().to_string()),
             TableRow::new("Sessions seen", report.sessions_seen.to_string()),
             TableRow::new(
                 "Dead-end categories",
@@ -109,7 +116,7 @@ pub fn run(args: LearnArgs, output: OutputFormat) -> Result<()> {
         blocks.push(trajectory_block);
     }
 
-    let mut steps = vec!["Update `.autoloop/learnings.md` with the patterns above".to_string()];
+    let mut steps = vec!["Review the refreshed `.autoloop/learnings.md` summary".to_string()];
     if !scope.all {
         steps.push("Run `autoloop learn --all` to inspect cross-session patterns".to_string());
     }
@@ -251,4 +258,68 @@ fn render_session_trajectory(session: &SessionTrajectory) -> String {
         "{}: {} experiments ({} kept, {} discarded, {} crashed), {}",
         label, session.experiments_run, session.kept, session.discarded, session.crashed, best
     )
+}
+
+fn render_learnings_markdown(
+    scope: &LearnScope,
+    report: &crate::experiments::LearnReport,
+) -> String {
+    let mut lines = vec![
+        "# Learnings".to_string(),
+        String::new(),
+        format!("Scope: {}", scope.label),
+        format!(
+            "Summary: {} experiments, {} kept, {} discarded, {} crashed",
+            report.summary.experiments_run,
+            report.summary.kept,
+            report.summary.discarded,
+            report.summary.crashed
+        ),
+        String::new(),
+        "## What Helped".to_string(),
+    ];
+
+    if report.best_experiments.is_empty() {
+        lines.push("- No kept improvements were recorded in this scope.".to_string());
+    } else {
+        for experiment in &report.best_experiments {
+            lines.push(format!("- {}", render_ranked_experiment(experiment)));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("## What Failed".to_string());
+    if report.worst_experiments.is_empty() {
+        lines.push("- No failed or regressed experiments were recorded in this scope.".to_string());
+    } else {
+        for experiment in &report.worst_experiments {
+            lines.push(format!("- {}", render_ranked_experiment(experiment)));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("## Watchouts".to_string());
+    if report.dead_end_categories.is_empty() && report.file_patterns.is_empty() {
+        lines.push("- No repeated dead ends or file-level patterns were detected yet.".to_string());
+    } else {
+        for dead_end in &report.dead_end_categories {
+            lines.push(format!("- {}", render_dead_end(dead_end)));
+        }
+        for pattern in &report.file_patterns {
+            lines.push(format!("- {}", render_file_pattern(pattern)));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("## Next Ideas".to_string());
+    if report.session_trajectory.is_empty() {
+        lines.push("- Run more experiments to build reliable learning signals.".to_string());
+    } else {
+        for trajectory in &report.session_trajectory {
+            lines.push(format!("- {}", render_session_trajectory(trajectory)));
+        }
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
 }

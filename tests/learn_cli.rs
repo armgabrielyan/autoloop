@@ -237,6 +237,64 @@ fn learn_session_flag_scopes_to_latest_completed_session() {
     assert_eq!(payload["report"]["summary"]["discarded"], 1);
 }
 
+#[test]
+fn learn_writes_markdown_summary_to_disk() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    init_git_repo(&temp);
+    init_workspace(&temp);
+    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("baseline")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["session", "start", "--name", "alpha"])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+    fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
+    fs::write(temp.path().join("src/api.rs"), "pub fn alpha() {}\n")
+        .expect("api file should write");
+    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("eval")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["keep", "--description", "api improvement", "--commit"])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["session", "end"])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["learn", "--all"])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    let learnings = fs::read_to_string(temp.path().join(".autoloop/learnings.md"))
+        .expect("learnings file should be readable");
+    assert!(learnings.contains("Scope: all experiments"));
+    assert!(learnings.contains("## What Helped"));
+    assert!(learnings.contains("api improvement"));
+    assert!(learnings.contains("latency_p95=45ms"));
+}
+
 fn init_git_repo(temp: &TempDir) {
     let repo = Repository::init(temp.path()).expect("git repo should initialize");
     fs::write(temp.path().join("tracked.txt"), "hello\n").expect("tracked file should write");
