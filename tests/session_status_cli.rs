@@ -10,7 +10,7 @@ fn session_end_reports_summary_and_trigger_learn() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -27,7 +27,7 @@ fn session_end_reports_summary_and_trigger_learn() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -43,7 +43,7 @@ fn session_end_reports_summary_and_trigger_learn() {
 
     fs::write(temp.path().join("tracked.txt"), "changed twice\n")
         .expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=60"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -85,7 +85,7 @@ fn status_scopes_to_active_session_and_all_history() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -101,7 +101,7 @@ fn status_scopes_to_active_session_and_all_history() {
         .assert()
         .success();
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -129,7 +129,7 @@ fn status_scopes_to_active_session_and_all_history() {
         .success();
     fs::write(temp.path().join("tracked.txt"), "changed twice\n")
         .expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=60"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -208,7 +208,7 @@ fn status_tolerates_future_fields_in_last_eval_state() {
     "confidence": 1.5,
     "verdict": "keep",
     "command": {
-      "command": "echo 'METRIC latency_p95=42'",
+      "command": "echo METRIC latency_p95=42",
       "exit_code": 0,
       "stdout": "METRIC latency_p95=42\n",
       "stderr": "",

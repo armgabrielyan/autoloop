@@ -10,7 +10,7 @@ fn finalize_groups_committed_keeps_into_review_branches() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -32,7 +32,7 @@ fn finalize_groups_committed_keeps_into_review_branches() {
         "pub fn api() -> u32 { 1 }\n",
     )
     .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -51,7 +51,7 @@ fn finalize_groups_committed_keeps_into_review_branches() {
         "pub fn api() -> u32 { 2 }\n",
     )
     .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=44'"));
+    write_config(&temp, &config("echo METRIC latency_p95=44"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -70,7 +70,7 @@ fn finalize_groups_committed_keeps_into_review_branches() {
         "pub fn cache() -> u32 { 3 }\n",
     )
     .expect("cache file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=43'"));
+    write_config(&temp, &config("echo METRIC latency_p95=43"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -86,7 +86,7 @@ fn finalize_groups_committed_keeps_into_review_branches() {
 
     fs::write(temp.path().join("src/docs.rs"), "pub fn docs() {}\n")
         .expect("docs file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=42'"));
+    write_config(&temp, &config("echo METRIC latency_p95=42"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -165,7 +165,7 @@ fn finalize_refuses_dirty_worktree() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -186,7 +186,7 @@ fn finalize_refuses_dirty_worktree() {
         "pub fn api() -> u32 { 1 }\n",
     )
     .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")

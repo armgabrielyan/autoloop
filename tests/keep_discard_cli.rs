@@ -11,7 +11,7 @@ fn keep_records_success_and_clears_pending_eval() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -21,7 +21,7 @@ fn keep_records_success_and_clears_pending_eval() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=45"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -64,7 +64,7 @@ fn strict_keep_refuses_non_keep_verdict() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("strict", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("strict", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -74,7 +74,7 @@ fn strict_keep_refuses_non_keep_verdict() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("strict", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("strict", "echo METRIC latency_p95=60"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -106,7 +106,7 @@ fn discard_revert_restores_tracked_file() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -116,7 +116,7 @@ fn discard_revert_restores_tracked_file() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=60"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -163,7 +163,7 @@ fn discard_revert_preserves_preexisting_untracked_setup_files() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -194,7 +194,7 @@ fn discard_revert_preserves_preexisting_untracked_setup_files() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=60"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -234,7 +234,7 @@ fn keep_survives_git_exclude_changes_when_experiment_paths_match() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -265,7 +265,7 @@ fn keep_survives_git_exclude_changes_when_experiment_paths_match() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=45"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -399,7 +399,7 @@ fn discard_refuses_when_worktree_drifted() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -409,7 +409,7 @@ fn discard_refuses_when_worktree_drifted() {
         .success();
 
     fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
-    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+    write_config(&temp, &config("advisory", "echo METRIC latency_p95=60"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")

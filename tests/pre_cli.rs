@@ -10,7 +10,7 @@ fn pre_uses_description_history_and_flags_failed_exact_matches() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -28,7 +28,7 @@ fn pre_uses_description_history_and_flags_failed_exact_matches() {
 
     fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
     fs::write(temp.path().join("src/api.rs"), "pub fn api() {}\n").expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -50,7 +50,7 @@ fn pre_uses_description_history_and_flags_failed_exact_matches() {
         .expect("cache file should write");
         write_config(
             &temp,
-            &config(&format!("echo 'METRIC latency_p95={metric}'")),
+            &config(&format!("echo METRIC latency_p95={metric}")),
         );
         Command::cargo_bin("autoloop")
             .expect("binary should build")
@@ -104,7 +104,7 @@ fn pre_prefers_working_tree_tags_when_changes_are_present() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -122,7 +122,7 @@ fn pre_prefers_working_tree_tags_when_changes_are_present() {
 
     fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
     fs::write(temp.path().join("src/api.rs"), "pub fn api() {}\n").expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")

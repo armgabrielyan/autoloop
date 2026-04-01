@@ -10,7 +10,7 @@ fn learn_reports_patterns_across_sessions() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -28,7 +28,7 @@ fn learn_reports_patterns_across_sessions() {
     fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
     fs::write(temp.path().join("src/api.rs"), "pub fn alpha() {}\n")
         .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -67,7 +67,7 @@ fn learn_reports_patterns_across_sessions() {
         .expect("cache file should write");
         write_config(
             &temp,
-            &config(&format!("echo 'METRIC latency_p95={metric}'")),
+            &config(&format!("echo METRIC latency_p95={metric}")),
         );
         Command::cargo_bin("autoloop")
             .expect("binary should build")
@@ -144,7 +144,7 @@ fn learn_session_flag_scopes_to_latest_completed_session() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -162,7 +162,7 @@ fn learn_session_flag_scopes_to_latest_completed_session() {
     fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
     fs::write(temp.path().join("src/api.rs"), "pub fn alpha() {}\n")
         .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -193,7 +193,7 @@ fn learn_session_flag_scopes_to_latest_completed_session() {
         "pub fn cache() -> u32 { 55 }\n",
     )
     .expect("cache file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=55'"));
+    write_config(&temp, &config("echo METRIC latency_p95=55"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
@@ -242,7 +242,7 @@ fn learn_writes_markdown_summary_to_disk() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
     init_workspace(&temp);
-    write_config(&temp, &config("echo 'METRIC latency_p95=50'"));
+    write_config(&temp, &config("echo METRIC latency_p95=50"));
 
     Command::cargo_bin("autoloop")
         .expect("binary should build")
@@ -260,7 +260,7 @@ fn learn_writes_markdown_summary_to_disk() {
     fs::create_dir_all(temp.path().join("src")).expect("src directory should exist");
     fs::write(temp.path().join("src/api.rs"), "pub fn alpha() {}\n")
         .expect("api file should write");
-    write_config(&temp, &config("echo 'METRIC latency_p95=45'"));
+    write_config(&temp, &config("echo METRIC latency_p95=45"));
     Command::cargo_bin("autoloop")
         .expect("binary should build")
         .arg("eval")
