@@ -1,5 +1,7 @@
 # Real Workflow Example
 
+For the stable regression bar across fixture repos, use the dedicated [acceptance matrix](./acceptance-matrix.md).
+
 Use [smoke-python-search](../../examples/smoke-python-search/README.md) as the first end-to-end integration test. It is intentionally small, deterministic, and easy for an agent to reason about.
 
 Once that works, use [smoke-rust-cli](../../examples/smoke-rust-cli/README.md) as the second test. It exercises the same loop with Cargo-native setup and commands.
