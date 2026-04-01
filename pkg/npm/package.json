@@ -1,0 +1,40 @@
+{
+  "name": "@armgabrielyan/autoloop",
+  "version": "0.1.0",
+  "description": "npm package for the AutoLoop CLI. Installs the `autoloop` command for agent-agnostic optimization loops.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/armgabrielyan/autoloop.git"
+  },
+  "author": "Armen Gabrielyan",
+  "license": "MIT",
+  "keywords": [
+    "autoloop",
+    "cli",
+    "agents",
+    "automation",
+    "optimization"
+  ],
+  "bin": {
+    "autoloop": "bin/autoloop"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}
