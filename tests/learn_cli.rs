@@ -65,10 +65,7 @@ fn learn_reports_patterns_across_sessions() {
             format!("pub fn cache() -> u32 {{ {metric} }}\n"),
         )
         .expect("cache file should write");
-        write_config(
-            &temp,
-            &config(&format!("echo METRIC latency_p95={metric}")),
-        );
+        write_config(&temp, &config(&format!("echo METRIC latency_p95={metric}")));
         Command::cargo_bin("autoloop")
             .expect("binary should build")
             .arg("eval")
