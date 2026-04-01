@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 
 use assert_cmd::Command;
 use git2::{IndexAddOption, Repository, Signature};
@@ -155,6 +156,145 @@ fn discard_revert_restores_tracked_file() {
     let records = read_jsonl(temp.path().join(".autoloop/experiments.jsonl"));
     assert_eq!(records[1]["status"], "discarded");
     assert_eq!(records[1]["reason"], "latency regressed");
+}
+
+#[test]
+fn discard_revert_preserves_preexisting_untracked_setup_files() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    init_git_repo(&temp);
+    init_workspace(&temp);
+    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("baseline")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::create_dir_all(temp.path().join(".agents/skills/autoloop-run"))
+        .expect("skills directory should exist");
+    fs::write(temp.path().join("AGENTS.md"), "# Installed wrapper\n")
+        .expect("context file should write");
+    fs::write(
+        temp.path().join(".agents/skills/autoloop-run/SKILL.md"),
+        "# Skill\n",
+    )
+    .expect("skill file should write");
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "pre",
+            "--description",
+            "reject tracked file change without touching installed wrappers",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
+    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=60'"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("eval")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "discard",
+            "--description",
+            "reject tracked change only",
+            "--reason",
+            "latency regressed",
+            "--revert",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(temp.path().join("tracked.txt")).expect("tracked file should read"),
+        "hello\n"
+    );
+    assert!(temp.path().join("AGENTS.md").exists());
+    assert!(
+        temp.path()
+            .join(".agents/skills/autoloop-run/SKILL.md")
+            .exists()
+    );
+}
+
+#[test]
+fn keep_survives_git_exclude_changes_when_experiment_paths_match() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    init_git_repo(&temp);
+    init_workspace(&temp);
+    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=50'"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("baseline")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::create_dir_all(temp.path().join(".agents/skills/autoloop-run"))
+        .expect("skills directory should exist");
+    fs::write(temp.path().join("AGENTS.md"), "# Installed wrapper\n")
+        .expect("context file should write");
+    fs::write(
+        temp.path().join(".agents/skills/autoloop-run/SKILL.md"),
+        "# Skill\n",
+    )
+    .expect("skill file should write");
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "pre",
+            "--description",
+            "keep tracked file change after local git metadata tweak",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
+    write_config(&temp, &config("advisory", "echo 'METRIC latency_p95=45'"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("eval")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    let mut exclude = fs::OpenOptions::new()
+        .append(true)
+        .open(temp.path().join(".git/info/exclude"))
+        .expect("exclude file should open");
+    writeln!(exclude, ".agents/").expect("exclude file should write");
+    writeln!(exclude, "AGENTS.md").expect("exclude file should write");
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "keep",
+            "--description",
+            "tracked change only after exclude tweak",
+            "--json",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    let last_eval = read_json(temp.path().join(".autoloop/last_eval.json"));
+    assert!(last_eval["pending_eval"].is_null());
 }
 
 #[test]

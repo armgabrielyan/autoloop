@@ -8,9 +8,9 @@ use crate::experiments::{
     ExperimentRecord, ExperimentStatus, ExperimentTags, MetricRecord, append_record,
     summarize_records,
 };
-use crate::git::{WorkingTreeSnapshot, capture_working_tree, commit_all};
+use crate::git::{commit_all, pending_worktree_matches};
 use crate::output::emit;
-use crate::state::{EvalVerdict, LastEvalState, State, write_session_markdown};
+use crate::state::{EvalVerdict, LastEvalState, RecordedWorktree, State, write_session_markdown};
 use crate::ui::{TableRow, Tone, banner, join_blocks, render_list, render_steps, render_table};
 
 pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
@@ -34,10 +34,10 @@ pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
         );
     }
 
-    let snapshot = capture_working_tree(&root)?;
     ensure_matching_snapshot(
+        &root,
+        &pending_eval.worktree,
         pending_eval.diff_fingerprint.as_deref(),
-        snapshot.fingerprint.as_deref(),
     )?;
 
     let mut git_notes = Vec::new();
@@ -45,7 +45,7 @@ pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
     if args.commit {
         if !config.git.enabled {
             git_notes.push("commit skipped because `[git].enabled` is false".to_string());
-        } else if !snapshot.has_changes {
+        } else if pending_eval.worktree.file_paths.is_empty() {
             git_notes.push("commit skipped because the working tree has no changes".to_string());
         } else {
             match commit_all(
@@ -79,9 +79,9 @@ pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
         verdict: Some(pending_eval.verdict),
         guardrails: pending_eval.guardrails.clone(),
         command: Some(pending_eval.command.clone()),
-        tags: snapshot_tags(&snapshot),
-        diff_summary: snapshot.diff_summary.clone(),
-        diff: snapshot.diff.clone(),
+        tags: snapshot_tags(&pending_eval.worktree),
+        diff_summary: pending_eval.worktree.diff_summary.clone(),
+        diff: pending_eval.worktree.diff.clone(),
         commit_hash: commit_hash.clone(),
     };
 
@@ -140,8 +140,22 @@ pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
     emit(output, join_blocks(blocks), &payload)
 }
 
-fn ensure_matching_snapshot(expected: Option<&str>, actual: Option<&str>) -> Result<()> {
-    if expected != actual {
+fn ensure_matching_snapshot(
+    root: &std::path::Path,
+    recorded: &RecordedWorktree,
+    legacy_fingerprint: Option<&str>,
+) -> Result<()> {
+    if !recorded.path_states.is_empty() {
+        if !pending_worktree_matches(root, recorded)? {
+            bail!(
+                "working tree no longer matches the recorded pending eval; rerun `autoloop eval` before finalizing it"
+            );
+        }
+        return Ok(());
+    }
+
+    let actual = crate::git::capture_working_tree(root)?;
+    if legacy_fingerprint != actual.fingerprint.as_deref() {
         bail!(
             "working tree no longer matches the recorded pending eval; rerun `autoloop eval` before finalizing it"
         );
@@ -150,7 +164,7 @@ fn ensure_matching_snapshot(expected: Option<&str>, actual: Option<&str>) -> Res
     Ok(())
 }
 
-fn snapshot_tags(snapshot: &WorkingTreeSnapshot) -> Option<ExperimentTags> {
+fn snapshot_tags(snapshot: &RecordedWorktree) -> Option<ExperimentTags> {
     if snapshot.file_paths.is_empty() && snapshot.auto_categories.is_empty() {
         return None;
     }

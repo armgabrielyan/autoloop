@@ -62,6 +62,8 @@ pub struct MetricSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct LastEvalState {
     pub schema_version: u32,
+    #[serde(default)]
+    pub prepared_experiment: Option<PreparedExperiment>,
     pub pending_eval: Option<PendingEval>,
 }
 
@@ -69,9 +71,19 @@ impl Default for LastEvalState {
     fn default() -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
+            prepared_experiment: None,
             pending_eval: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedExperiment {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub worktree: RecordedWorktree,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +99,37 @@ pub struct PendingEval {
     pub guardrails: Vec<GuardrailOutcome>,
     #[serde(default)]
     pub diff_fingerprint: Option<String>,
+    #[serde(default)]
+    pub worktree: RecordedWorktree,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedWorktree {
+    #[serde(default)]
+    pub file_paths: Vec<String>,
+    #[serde(default)]
+    pub untracked_paths: Vec<String>,
+    #[serde(default)]
+    pub auto_categories: Vec<String>,
+    #[serde(default)]
+    pub diff_summary: Option<String>,
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub path_states: Vec<PathState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathState {
+    pub path: String,
+    #[serde(default)]
+    pub untracked: bool,
+    #[serde(default)]
+    pub exists: bool,
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

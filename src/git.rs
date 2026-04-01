@@ -9,6 +9,7 @@ use git2::{
 };
 
 use crate::error::GitError;
+use crate::state::{PathState, PreparedExperiment, RecordedWorktree};
 use crate::tags::derive_categories;
 
 #[derive(Debug, Clone, Default)]
@@ -20,6 +21,7 @@ pub struct WorkingTreeSnapshot {
     pub diff_summary: Option<String>,
     pub diff: Option<String>,
     pub untracked_paths: Vec<String>,
+    pub path_states: Vec<PathState>,
 }
 
 #[derive(Debug, Clone)]
@@ -87,9 +89,9 @@ pub fn capture_working_tree(root: &Path) -> Result<WorkingTreeSnapshot> {
     let Some(repo) = discover_repository(root)? else {
         return Ok(WorkingTreeSnapshot::default());
     };
-    if repo.workdir().is_none() {
+    let Some(workdir) = repo.workdir() else {
         return Ok(WorkingTreeSnapshot::default());
-    }
+    };
 
     let statuses = capture_statuses(&repo)?;
     let file_paths: Vec<String> = statuses.keys().cloned().collect();
@@ -97,6 +99,7 @@ pub fn capture_working_tree(root: &Path) -> Result<WorkingTreeSnapshot> {
         .iter()
         .filter_map(|(path, is_untracked)| is_untracked.then_some(path.clone()))
         .collect();
+    let path_states = capture_path_states(workdir, &statuses)?;
 
     let (diff_summary, diff) = capture_diff(&repo)?;
     let fingerprint = diff
@@ -122,7 +125,40 @@ pub fn capture_working_tree(root: &Path) -> Result<WorkingTreeSnapshot> {
         diff_summary,
         diff,
         untracked_paths,
+        path_states,
     })
+}
+
+pub fn derive_experiment_worktree(
+    prepared: Option<&PreparedExperiment>,
+    current: &WorkingTreeSnapshot,
+) -> RecordedWorktree {
+    match prepared {
+        Some(prepared) => diff_recorded_worktree(&prepared.worktree, current),
+        None => recorded_worktree_from_snapshot(current),
+    }
+}
+
+pub fn recorded_worktree_from_snapshot(snapshot: &WorkingTreeSnapshot) -> RecordedWorktree {
+    RecordedWorktree {
+        file_paths: snapshot.file_paths.clone(),
+        untracked_paths: snapshot.untracked_paths.clone(),
+        auto_categories: snapshot.auto_categories.clone(),
+        diff_summary: snapshot.diff_summary.clone(),
+        diff: snapshot.diff.clone(),
+        path_states: snapshot.path_states.clone(),
+    }
+}
+
+pub fn pending_worktree_matches(root: &Path, recorded: &RecordedWorktree) -> Result<bool> {
+    for expected in &recorded.path_states {
+        let actual = capture_current_path_state(root, expected)?;
+        if actual != *expected {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 pub fn ensure_clean_worktree(root: &Path) -> Result<()> {
@@ -486,6 +522,103 @@ fn capture_statuses(repo: &Repository) -> Result<BTreeMap<String, bool>> {
     Ok(entries)
 }
 
+fn capture_path_states(
+    workdir: &Path,
+    statuses: &BTreeMap<String, bool>,
+) -> Result<Vec<PathState>> {
+    statuses
+        .iter()
+        .map(|(path, untracked)| {
+            let absolute = workdir.join(path);
+            Ok(PathState {
+                path: path.clone(),
+                untracked: *untracked,
+                exists: absolute.exists(),
+                content_hash: hash_path_contents(&absolute)?,
+            })
+        })
+        .collect()
+}
+
+fn capture_current_path_state(root: &Path, expected: &PathState) -> Result<PathState> {
+    let Some(repo) = discover_repository(root)? else {
+        return Ok(PathState {
+            path: expected.path.clone(),
+            untracked: expected.untracked,
+            exists: false,
+            content_hash: None,
+        });
+    };
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow!("git operations require a non-bare repository"))?;
+    let absolute = workdir.join(&expected.path);
+    Ok(PathState {
+        path: expected.path.clone(),
+        untracked: expected.untracked,
+        exists: absolute.exists(),
+        content_hash: hash_path_contents(&absolute)?,
+    })
+}
+
+fn diff_recorded_worktree(
+    base: &RecordedWorktree,
+    current: &WorkingTreeSnapshot,
+) -> RecordedWorktree {
+    let base_states: BTreeMap<&str, &PathState> = base
+        .path_states
+        .iter()
+        .map(|state| (state.path.as_str(), state))
+        .collect();
+    let current_states: BTreeMap<&str, &PathState> = current
+        .path_states
+        .iter()
+        .map(|state| (state.path.as_str(), state))
+        .collect();
+    let mut all_paths = BTreeSet::new();
+    all_paths.extend(base_states.keys().copied());
+    all_paths.extend(current_states.keys().copied());
+
+    let mut path_states = Vec::new();
+    let mut file_paths = Vec::new();
+    let mut untracked_paths = Vec::new();
+    for path in all_paths {
+        let current_state = current_states
+            .get(path)
+            .map(|state| (*state).clone())
+            .unwrap_or_else(|| PathState {
+                path: path.to_string(),
+                untracked: base_states
+                    .get(path)
+                    .map(|state| state.untracked)
+                    .unwrap_or(false),
+                exists: false,
+                content_hash: None,
+            });
+        if base_states.get(path).map(|state| (*state).clone()) == Some(current_state.clone()) {
+            continue;
+        }
+        if current_state.untracked {
+            untracked_paths.push(current_state.path.clone());
+        }
+        file_paths.push(current_state.path.clone());
+        path_states.push(current_state);
+    }
+
+    let auto_categories = derive_categories(file_paths.iter().map(String::as_str))
+        .into_iter()
+        .collect();
+
+    RecordedWorktree {
+        file_paths,
+        untracked_paths,
+        auto_categories,
+        diff_summary: None,
+        diff: None,
+        path_states,
+    }
+}
+
 fn capture_diff(repo: &Repository) -> Result<(Option<String>, Option<String>)> {
     let head_tree = head_tree(repo)?;
     let mut options = DiffOptions::new();
@@ -534,6 +667,69 @@ fn capture_diff(repo: &Repository) -> Result<(Option<String>, Option<String>)> {
     };
 
     Ok((diff_summary, diff))
+}
+
+fn hash_path_contents(path: &Path) -> Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let metadata = fs::symlink_metadata(path).map_err(|source| GitError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.is_dir() {
+        return Ok(Some(hash_directory(path)?));
+    }
+
+    let bytes = fs::read(path).map_err(|source| GitError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Oid::hash_object(ObjectType::Blob, &bytes)
+        .map(|oid| Some(oid.to_string()))
+        .map_err(|source| {
+            GitError::Operation {
+                operation: "hash path contents",
+                source,
+            }
+            .into()
+        })
+}
+
+fn hash_directory(path: &Path) -> Result<String> {
+    let mut entries = fs::read_dir(path)
+        .map_err(|source| GitError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|source| GitError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut manifest = String::new();
+    for entry in entries {
+        let entry_path = entry.path();
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        let child_hash = hash_path_contents(&entry_path)?.unwrap_or_else(|| "missing".to_string());
+        manifest.push_str(&entry_name);
+        manifest.push('\t');
+        manifest.push_str(&child_hash);
+        manifest.push('\n');
+    }
+
+    Oid::hash_object(ObjectType::Blob, manifest.as_bytes())
+        .map(|oid| oid.to_string())
+        .map_err(|source| {
+            GitError::Operation {
+                operation: "hash directory contents",
+                source,
+            }
+            .into()
+        })
 }
 
 fn head_tree<'repo>(repo: &'repo Repository) -> Result<Option<git2::Tree<'repo>>> {

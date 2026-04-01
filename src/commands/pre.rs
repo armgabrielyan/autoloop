@@ -8,9 +8,9 @@ use crate::experiments::{
     CategorySignal, PreflightReport, PreflightVerdict, QuerySource, SimilarExperiment,
     preflight_report,
 };
-use crate::git::capture_working_tree;
+use crate::git::{capture_working_tree, recorded_worktree_from_snapshot};
 use crate::output::emit;
-use crate::state::State;
+use crate::state::{LastEvalState, PreparedExperiment, State};
 use crate::tags::{
     derive_categories, derive_paths_from_description, derive_terms_from_description,
 };
@@ -23,11 +23,12 @@ pub fn run(args: PreArgs, output: OutputFormat) -> Result<()> {
     }
 
     let snapshot = capture_working_tree(&root)?;
+    let prepared_worktree = recorded_worktree_from_snapshot(&snapshot);
     let (source, file_paths, categories) = if snapshot.has_changes {
         (
             QuerySource::WorkingTree,
-            snapshot.file_paths,
-            snapshot.auto_categories,
+            snapshot.file_paths.clone(),
+            snapshot.auto_categories.clone(),
         )
     } else {
         let paths: Vec<String> = derive_paths_from_description(&args.description)
@@ -43,6 +44,12 @@ pub fn run(args: PreArgs, output: OutputFormat) -> Result<()> {
     };
 
     let report = preflight_report(&root, &args.description, source, &file_paths, &categories)?;
+    let mut last_eval = LastEvalState::load_or_default(&root)?;
+    last_eval.prepared_experiment = Some(PreparedExperiment {
+        description: Some(args.description.clone()),
+        worktree: prepared_worktree,
+    });
+    last_eval.save(&root)?;
     let payload = json!({
         "query": {
             "description": report.description.clone(),
