@@ -5,7 +5,8 @@ use serde::Serialize;
 use crate::config::{Config, GuardrailConfig, GuardrailKind, default_config};
 use crate::eval::guardrails::parse_threshold;
 use crate::eval::{
-    RuntimeFailure, compile_regex, run_metric_command_with_retries, run_raw_command_capture,
+    MetricCommandSpec, RuntimeFailure, compile_regex, run_metric_command_with_retries,
+    run_raw_command_capture,
 };
 use crate::state::{CommandCapture, MetricSnapshot};
 
@@ -104,16 +105,16 @@ fn validate_eval(root: &Path, config: &Config) -> ValidationCheck {
         }
     };
 
-    match run_metric_command_with_retries(
-        &config.eval.command,
-        config.eval.retries,
-        config.eval.timeout,
-        config.eval.format,
-        regex.as_ref(),
-        &config.metric.name,
-        config.metric.unit.as_deref(),
-        root,
-    ) {
+    let metric_spec = MetricCommandSpec {
+        command: &config.eval.command,
+        retries: config.eval.retries,
+        timeout_secs: config.eval.timeout,
+        format: config.eval.format,
+        regex: regex.as_ref(),
+        metric_name: &config.metric.name,
+        unit: config.metric.unit.as_deref(),
+    };
+    match run_metric_command_with_retries(&metric_spec, root) {
         Ok(execution) => ValidationCheck {
             name: "eval".to_string(),
             kind: CheckKind::Eval,
@@ -230,16 +231,16 @@ fn validate_metric_guardrail(
         }
     };
 
-    match run_metric_command_with_retries(
-        &guardrail.command,
-        0,
-        config.eval.timeout,
-        guardrail.format,
-        regex.as_ref(),
-        &guardrail.name,
-        None,
-        root,
-    ) {
+    let metric_spec = MetricCommandSpec {
+        command: &guardrail.command,
+        retries: 0,
+        timeout_secs: config.eval.timeout,
+        format: guardrail.format,
+        regex: regex.as_ref(),
+        metric_name: &guardrail.name,
+        unit: None,
+    };
+    match run_metric_command_with_retries(&metric_spec, root) {
         Ok(execution) => ValidationCheck {
             name: guardrail.name.clone(),
             kind: CheckKind::MetricGuardrail,

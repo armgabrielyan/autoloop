@@ -78,29 +78,35 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
     }
 
     if args.dry_run {
+        let root_display = root.display().to_string();
+        let dir_display = display_path(&root, &dir);
+        let config_display = display_path(&root, &config);
+        let state_display = display_path(&root, &state_path);
+        let last_eval_display = display_path(&root, &last_eval_path);
         let payload = json!({
             "dry_run": true,
             "created": created,
             "updated": updated,
-            "root": root.display().to_string(),
+            "root": root_display,
             "config_inference": &inference,
             "verification": serde_json::Value::Null,
             "verification_skipped": args.verify,
         });
-        let human = render_summary(
-            Tone::Warning,
-            "Dry run",
-            &root.display().to_string(),
-            &display_path(&root, &dir),
-            &display_path(&root, &config),
-            &display_path(&root, &state_path),
-            &display_path(&root, &last_eval_path),
-            &inference,
-            None,
-            args.verify,
-            &created,
-            &updated,
-        );
+        let summary = InitSummary {
+            tone: Tone::Warning,
+            title: "Dry run",
+            root: &root_display,
+            dir: &dir_display,
+            config: &config_display,
+            state_path: &state_display,
+            last_eval_path: &last_eval_display,
+            inference: &inference,
+            verification: None,
+            verification_skipped: args.verify,
+            created: &created,
+            updated: &updated,
+        };
+        let human = render_summary(&summary);
         return emit(output, human, &payload);
     }
 
@@ -135,101 +141,114 @@ pub fn run(args: InitArgs, output: OutputFormat) -> Result<()> {
         .as_ref()
         .map(|report| report.healthy)
         .unwrap_or(true);
+    let root_display = root.display().to_string();
+    let dir_display = display_path(&root, &dir);
+    let config_display = display_path(&root, &config);
+    let state_display = display_path(&root, &state_path);
+    let last_eval_display = display_path(&root, &last_eval_path);
 
     let payload = json!({
         "dry_run": false,
         "created": created,
         "updated": updated,
-        "root": root.display().to_string(),
+        "root": root_display,
         "config_inference": &inference,
         "verification": &verification,
         "verification_skipped": false,
     });
-    let human = render_summary(
-        if verification_healthy {
+    let summary = InitSummary {
+        tone: if verification_healthy {
             Tone::Success
         } else {
             Tone::Warning
         },
-        if verification_healthy {
+        title: if verification_healthy {
             "Initialized autoloop"
         } else {
             "Initialized autoloop (verification needs attention)"
         },
-        &root.display().to_string(),
-        &display_path(&root, &dir),
-        &display_path(&root, &config),
-        &display_path(&root, &state_path),
-        &display_path(&root, &last_eval_path),
-        &inference,
-        verification.as_ref(),
-        false,
-        &created,
-        &updated,
-    );
+        root: &root_display,
+        dir: &dir_display,
+        config: &config_display,
+        state_path: &state_display,
+        last_eval_path: &last_eval_display,
+        inference: &inference,
+        verification: verification.as_ref(),
+        verification_skipped: false,
+        created: &created,
+        updated: &updated,
+    };
+    let human = render_summary(&summary);
     emit(output, human, &payload)
 }
 
-fn render_summary(
+struct InitSummary<'a> {
     tone: Tone,
-    title: &str,
-    root: &str,
-    dir: &str,
-    config: &str,
-    state_path: &str,
-    last_eval_path: &str,
-    inference: &ConfigInference,
-    verification: Option<&ValidationReport>,
+    title: &'a str,
+    root: &'a str,
+    dir: &'a str,
+    config: &'a str,
+    state_path: &'a str,
+    last_eval_path: &'a str,
+    inference: &'a ConfigInference,
+    verification: Option<&'a ValidationReport>,
     verification_skipped: bool,
-    created: &[String],
-    updated: &[String],
-) -> String {
-    let guardrails = if inference.guardrail_commands.is_empty() {
+    created: &'a [String],
+    updated: &'a [String],
+}
+
+fn render_summary(summary: &InitSummary<'_>) -> String {
+    let guardrails = if summary.inference.guardrail_commands.is_empty() {
         "none detected".to_string()
     } else {
-        inference.guardrail_commands.join(", ")
+        summary.inference.guardrail_commands.join(", ")
     };
     let table = render_table(&[
-        TableRow::new("Workspace", root),
-        TableRow::new("Autoloop dir", dir),
-        TableRow::new("Config", config),
-        TableRow::new("Config source", render_source(inference.source)),
-        TableRow::new("Project", render_project_kind(inference.project_kind)),
+        TableRow::new("Workspace", summary.root),
+        TableRow::new("Autoloop dir", summary.dir),
+        TableRow::new("Config", summary.config),
+        TableRow::new("Config source", render_source(summary.inference.source)),
+        TableRow::new(
+            "Project",
+            render_project_kind(summary.inference.project_kind),
+        ),
         TableRow::new(
             "Metric",
             render_metric(
-                &inference.metric_name,
-                inference.metric_direction,
-                inference.metric_unit.as_deref(),
+                &summary.inference.metric_name,
+                summary.inference.metric_direction,
+                summary.inference.metric_unit.as_deref(),
             ),
         ),
-        TableRow::new("Eval command", inference.eval_command.clone()),
+        TableRow::new("Eval command", summary.inference.eval_command.clone()),
         TableRow::new("Guardrails", guardrails),
         TableRow::new(
             "Verified",
-            render_verification_status(verification, verification_skipped),
+            render_verification_status(summary.verification, summary.verification_skipped),
         ),
-        TableRow::new("State", state_path),
-        TableRow::new("Pending eval", last_eval_path),
+        TableRow::new("State", summary.state_path),
+        TableRow::new("Pending eval", summary.last_eval_path),
     ]);
 
-    let mut blocks = vec![banner(tone, title), table];
-    if let Some(created_block) = render_list("Created", created) {
+    let mut blocks = vec![banner(summary.tone, summary.title), table];
+    if let Some(created_block) = render_list("Created", summary.created) {
         blocks.push(created_block);
     }
-    if let Some(updated_block) = render_list("Updated", updated) {
+    if let Some(updated_block) = render_list("Updated", summary.updated) {
         blocks.push(updated_block);
     }
-    if let Some(notes_block) = render_list("Inference", &inference.notes) {
+    if let Some(notes_block) = render_list("Inference", &summary.inference.notes) {
         blocks.push(notes_block);
     }
     if let Some(verification_block) = render_list(
         "Verification",
-        &render_verification_lines(verification, verification_skipped),
+        &render_verification_lines(summary.verification, summary.verification_skipped),
     ) {
         blocks.push(verification_block);
     }
-    if let Some(next_block) = render_steps("Next", &next_steps(inference, verification)) {
+    if let Some(next_block) =
+        render_steps("Next", &next_steps(summary.inference, summary.verification))
+    {
         blocks.push(next_block);
     }
 

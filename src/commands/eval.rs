@@ -8,8 +8,8 @@ use crate::config::{Config, GuardrailConfig, GuardrailKind};
 use crate::eval::confidence::confidence_score;
 use crate::eval::guardrails::{parse_threshold, passes_threshold};
 use crate::eval::{
-    RuntimeFailure, assert_no_pending_eval, compile_regex, delta_from_baseline, derive_verdict,
-    run_metric_command_with_retries, run_raw_command_capture,
+    MetricCommandSpec, RuntimeFailure, assert_no_pending_eval, compile_regex, delta_from_baseline,
+    derive_verdict, run_metric_command_with_retries, run_raw_command_capture,
 };
 use crate::experiments::{ExperimentRecord, ExperimentStatus, append_record, metric_observations};
 use crate::git::{capture_working_tree, derive_experiment_worktree};
@@ -37,16 +37,16 @@ pub fn run(args: EvalArgs, output: OutputFormat) -> Result<()> {
     let spinner = Spinner::new("Running evaluation");
     let metric_regex = compile_regex(config.eval.regex.as_deref())?;
 
-    let metric = match run_metric_command_with_retries(
-        &command,
-        config.eval.retries,
-        config.eval.timeout,
-        config.eval.format,
-        metric_regex.as_ref(),
-        &config.metric.name,
-        config.metric.unit.as_deref(),
-        &root,
-    ) {
+    let metric_spec = MetricCommandSpec {
+        command: &command,
+        retries: config.eval.retries,
+        timeout_secs: config.eval.timeout,
+        format: config.eval.format,
+        regex: metric_regex.as_ref(),
+        metric_name: &config.metric.name,
+        unit: config.metric.unit.as_deref(),
+    };
+    let metric = match run_metric_command_with_retries(&metric_spec, &root) {
         Ok(metric) => metric,
         Err(failure) => {
             spinner.finish();
@@ -190,17 +190,17 @@ fn evaluate_guardrail(
                 parse_threshold(&threshold_spec).map_err(GuardrailEvaluationError::Config)?;
             let regex = compile_regex(guardrail.regex.as_deref())
                 .map_err(GuardrailEvaluationError::Config)?;
-            let metric = run_metric_command_with_retries(
-                &guardrail.command,
-                0,
-                config.eval.timeout,
-                guardrail.format,
-                regex.as_ref(),
-                &guardrail.name,
-                None,
-                root,
-            )
-            .map_err(GuardrailEvaluationError::Runtime)?;
+            let metric_spec = MetricCommandSpec {
+                command: &guardrail.command,
+                retries: 0,
+                timeout_secs: config.eval.timeout,
+                format: guardrail.format,
+                regex: regex.as_ref(),
+                metric_name: &guardrail.name,
+                unit: None,
+            };
+            let metric = run_metric_command_with_retries(&metric_spec, root)
+                .map_err(GuardrailEvaluationError::Runtime)?;
             let passed = passes_threshold(metric.metric.value, baseline_guardrail.value, threshold)
                 .map_err(GuardrailEvaluationError::Config)?;
 

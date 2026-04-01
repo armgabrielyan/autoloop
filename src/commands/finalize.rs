@@ -107,25 +107,25 @@ fn resolve_scope(
         });
     }
 
-    if let Some(session) = &state.active_session {
-        if args.session || !args.all {
-            let label = format!(
-                "session {}",
-                session.name.as_deref().unwrap_or(session.id.as_str())
-            );
-            let scope_slug = session
-                .name
-                .as_deref()
-                .map(slugify)
-                .filter(|slug| !slug.is_empty())
-                .unwrap_or_else(|| slugify(&session.id));
-            return Ok(FinalizeScope {
-                all: false,
-                session_id: Some(session.id.clone()),
-                label,
-                scope_slug,
-            });
-        }
+    if let Some(session) = &state.active_session
+        && (args.session || !args.all)
+    {
+        let label = format!(
+            "session {}",
+            session.name.as_deref().unwrap_or(session.id.as_str())
+        );
+        let scope_slug = session
+            .name
+            .as_deref()
+            .map(slugify)
+            .filter(|slug| !slug.is_empty())
+            .unwrap_or_else(|| slugify(&session.id));
+        return Ok(FinalizeScope {
+            all: false,
+            session_id: Some(session.id.clone()),
+            label,
+            scope_slug,
+        });
     }
 
     if args.session {

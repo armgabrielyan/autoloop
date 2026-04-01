@@ -323,10 +323,10 @@ pub fn metric_observations(root: &Path, metric_name: &str) -> Result<Vec<f64>> {
         if matches!(record.status, ExperimentStatus::Crashed) {
             continue;
         }
-        if let Some(metric) = record.metric {
-            if metric.name == metric_name {
-                observations.push(metric.value);
-            }
+        if let Some(metric) = record.metric
+            && metric.name == metric_name
+        {
+            observations.push(metric.value);
         }
     }
 
@@ -1059,16 +1059,16 @@ fn preflight_verdict(
         );
     }
 
-    if let Some(best_category) = category_signals.first() {
-        if best_category.success_rate >= 0.6 {
-            return (
-                PreflightVerdict::Proceed,
-                format!(
-                    "category `{}` has worked {}/{} times",
-                    best_category.name, best_category.kept, best_category.attempts
-                ),
-            );
-        }
+    if let Some(best_category) = category_signals.first()
+        && best_category.success_rate >= 0.6
+    {
+        return (
+            PreflightVerdict::Proceed,
+            format!(
+                "category `{}` has worked {}/{} times",
+                best_category.name, best_category.kept, best_category.attempts
+            ),
+        );
     }
 
     (

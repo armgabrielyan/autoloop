@@ -143,17 +143,17 @@ fn resolve_scope(root: &std::path::Path, state: &State, args: &LearnArgs) -> Res
         });
     }
 
-    if let Some(session) = &state.active_session {
-        if args.session || !args.all {
-            return Ok(LearnScope {
-                all: false,
-                session_id: Some(session.id.clone()),
-                label: format!(
-                    "session {}",
-                    session.name.as_deref().unwrap_or(session.id.as_str())
-                ),
-            });
-        }
+    if let Some(session) = &state.active_session
+        && (args.session || !args.all)
+    {
+        return Ok(LearnScope {
+            all: false,
+            session_id: Some(session.id.clone()),
+            label: format!(
+                "session {}",
+                session.name.as_deref().unwrap_or(session.id.as_str())
+            ),
+        });
     }
 
     if args.session {

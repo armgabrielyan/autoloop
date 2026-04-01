@@ -5,7 +5,9 @@ use serde_json::json;
 
 use crate::cli::{BaselineArgs, OutputFormat};
 use crate::config::{Config, GuardrailKind};
-use crate::eval::{compile_regex, run_command_capture, run_metric_command_with_retries};
+use crate::eval::{
+    MetricCommandSpec, compile_regex, run_command_capture, run_metric_command_with_retries,
+};
 use crate::experiments::{ExperimentRecord, ExperimentStatus, MetricRecord, append_record};
 use crate::output::emit;
 use crate::state::{
@@ -24,17 +26,17 @@ pub fn run(_args: BaselineArgs, output: OutputFormat) -> Result<()> {
 
     let spinner = Spinner::new("Recording baseline");
     let metric_regex = compile_regex(config.eval.regex.as_deref())?;
-    let metric = run_metric_command_with_retries(
-        &config.eval.command,
-        config.eval.retries,
-        config.eval.timeout,
-        config.eval.format,
-        metric_regex.as_ref(),
-        &config.metric.name,
-        config.metric.unit.as_deref(),
-        &root,
-    )
-    .map_err(|failure| anyhow!(failure.message))?;
+    let metric_spec = MetricCommandSpec {
+        command: &config.eval.command,
+        retries: config.eval.retries,
+        timeout_secs: config.eval.timeout,
+        format: config.eval.format,
+        regex: metric_regex.as_ref(),
+        metric_name: &config.metric.name,
+        unit: config.metric.unit.as_deref(),
+    };
+    let metric = run_metric_command_with_retries(&metric_spec, &root)
+        .map_err(|failure| anyhow!(failure.message))?;
 
     let guardrails = collect_baseline_guardrails(&config, &root)?;
     let baseline_guardrails: Vec<GuardrailBaseline> = guardrails
@@ -152,17 +154,17 @@ fn collect_baseline_guardrails(config: &Config, root: &Path) -> Result<Vec<Guard
             }
             GuardrailKind::Metric => {
                 let regex = compile_regex(guardrail.regex.as_deref())?;
-                let metric = run_metric_command_with_retries(
-                    &guardrail.command,
-                    0,
-                    config.eval.timeout,
-                    guardrail.format,
-                    regex.as_ref(),
-                    &guardrail.name,
-                    None,
-                    root,
-                )
-                .map_err(|failure| anyhow!(failure.message))?;
+                let metric_spec = MetricCommandSpec {
+                    command: &guardrail.command,
+                    retries: 0,
+                    timeout_secs: config.eval.timeout,
+                    format: guardrail.format,
+                    regex: regex.as_ref(),
+                    metric_name: &guardrail.name,
+                    unit: None,
+                };
+                let metric = run_metric_command_with_retries(&metric_spec, root)
+                    .map_err(|failure| anyhow!(failure.message))?;
                 outcomes.push(GuardrailOutcome {
                     name: guardrail.name.clone(),
                     kind: guardrail.kind,

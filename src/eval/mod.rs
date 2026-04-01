@@ -34,6 +34,17 @@ pub struct RuntimeFailure {
     pub command: CommandCapture,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MetricCommandSpec<'a> {
+    pub command: &'a str,
+    pub retries: u32,
+    pub timeout_secs: u64,
+    pub format: formats::MetricFormat,
+    pub regex: Option<&'a Regex>,
+    pub metric_name: &'a str,
+    pub unit: Option<&'a str>,
+}
+
 pub fn compile_regex(pattern: Option<&str>) -> Result<Option<Regex>> {
     match pattern {
         Some(pattern) => Ok(Some(Regex::new(pattern)?)),
@@ -42,28 +53,23 @@ pub fn compile_regex(pattern: Option<&str>) -> Result<Option<Regex>> {
 }
 
 pub fn run_metric_command(
-    command: &str,
-    timeout_secs: u64,
-    format: formats::MetricFormat,
-    regex: Option<&Regex>,
-    metric_name: &str,
-    unit: Option<&str>,
+    spec: &MetricCommandSpec<'_>,
     cwd: &Path,
 ) -> std::result::Result<MetricExecution, RuntimeFailure> {
-    let capture = run_command_capture(command, timeout_secs, cwd)?;
+    let capture = run_command_capture(spec.command, spec.timeout_secs, cwd)?;
     let parse_source = combined_output(&capture);
-    let value = formats::parse_metric_value(format, &parse_source, metric_name, regex).map_err(
-        |error| RuntimeFailure {
-            message: format!("failed to parse metric from `{command}`: {error}"),
-            command: capture.clone(),
-        },
-    )?;
+    let value =
+        formats::parse_metric_value(spec.format, &parse_source, spec.metric_name, spec.regex)
+            .map_err(|error| RuntimeFailure {
+                message: format!("failed to parse metric from `{}`: {error}", spec.command),
+                command: capture.clone(),
+            })?;
 
     Ok(MetricExecution {
         metric: MetricSnapshot {
-            name: metric_name.to_string(),
+            name: spec.metric_name.to_string(),
             value,
-            unit: unit.map(str::to_string),
+            unit: spec.unit.map(str::to_string),
             recorded_at: Utc::now(),
         },
         command: capture,
@@ -71,20 +77,14 @@ pub fn run_metric_command(
 }
 
 pub fn run_metric_command_with_retries(
-    command: &str,
-    retries: u32,
-    timeout_secs: u64,
-    format: formats::MetricFormat,
-    regex: Option<&Regex>,
-    metric_name: &str,
-    unit: Option<&str>,
+    spec: &MetricCommandSpec<'_>,
     cwd: &Path,
 ) -> std::result::Result<MetricExecution, RuntimeFailure> {
-    let attempts = retries + 1;
+    let attempts = spec.retries + 1;
     let mut last_failure = None;
 
     for _ in 0..attempts {
-        match run_metric_command(command, timeout_secs, format, regex, metric_name, unit, cwd) {
+        match run_metric_command(spec, cwd) {
             Ok(metric) => return Ok(metric),
             Err(failure) => last_failure = Some(failure),
         }

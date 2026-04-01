@@ -73,10 +73,10 @@ pub fn build_finalize_plan(root: &Path, session_id: Option<&str>) -> Result<Fina
         .iter()
         .filter(|record| matches!(record.status, ExperimentStatus::Kept))
     {
-        if let Some(session_id) = session_id {
-            if record.session_id.as_deref() != Some(session_id) {
-                continue;
-            }
+        if let Some(session_id) = session_id
+            && record.session_id.as_deref() != Some(session_id)
+        {
+            continue;
         }
 
         match finalize_candidate(record) {
@@ -262,7 +262,7 @@ fn branch_slug(
             descriptions
                 .iter()
                 .flat_map(|description| description.split_whitespace())
-                .map(|token| sanitize_slug(token))
+                .map(sanitize_slug)
                 .filter(|token| !token.is_empty())
                 .take(2),
         );

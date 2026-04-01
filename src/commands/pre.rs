@@ -104,7 +104,9 @@ pub fn run(args: PreArgs, output: OutputFormat) -> Result<()> {
     ) {
         blocks.push(matches_block);
     }
-    if let Some(reason_block) = render_list("Assessment", &[report.verdict_reason.clone()]) {
+    if let Some(reason_block) =
+        render_list("Assessment", std::slice::from_ref(&report.verdict_reason))
+    {
         blocks.push(reason_block);
     }
 

@@ -208,13 +208,14 @@ fn render_warnings(
         );
     } else if fix.applied {
         warnings.push("Applied a verified inferred config.".to_string());
-    } else if let Some(candidate) = candidate {
-        if !candidate.report.healthy && !report.healthy {
-            warnings.push(
-                "The inferred config was also unhealthy; this repo likely needs manual config edits."
-                    .to_string(),
-            );
-        }
+    } else if let Some(candidate) = candidate
+        && !candidate.report.healthy
+        && !report.healthy
+    {
+        warnings.push(
+            "The inferred config was also unhealthy; this repo likely needs manual config edits."
+                .to_string(),
+        );
     }
     warnings
 }
@@ -244,13 +245,13 @@ fn next_steps(
             .to_string(),
         "Rerun `autoloop doctor` after editing the config.".to_string(),
     ];
-    if let Some(candidate) = candidate {
-        if !matches!(candidate.inference.source, ConfigSource::Template) {
-            steps.push(format!(
-                "Compare your config against the inferred eval command `{}`.",
-                candidate.inference.eval_command
-            ));
-        }
+    if let Some(candidate) = candidate
+        && !matches!(candidate.inference.source, ConfigSource::Template)
+    {
+        steps.push(format!(
+            "Compare your config against the inferred eval command `{}`.",
+            candidate.inference.eval_command
+        ));
     }
     steps
 }

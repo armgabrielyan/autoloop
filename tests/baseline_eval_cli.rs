@@ -11,8 +11,8 @@ fn baseline_records_metric_and_guardrail_baselines() {
     write_config(
         &temp,
         &baseline_config(
-            "echo 'METRIC latency_p95=50'",
-            Some("echo 'METRIC memory_mb=100'"),
+            &metric_echo("latency_p95", 50),
+            Some(&metric_echo("memory_mb", 100)),
             None,
         ),
     );
@@ -47,7 +47,7 @@ fn eval_records_pending_eval_with_rerun_verdict() {
     init_workspace(&temp);
     write_config(
         &temp,
-        &baseline_config("echo 'METRIC latency_p95=50'", None, None),
+        &baseline_config(&metric_echo("latency_p95", 50), None, None),
     );
 
     Command::cargo_bin("autoloop")
@@ -59,7 +59,7 @@ fn eval_records_pending_eval_with_rerun_verdict() {
 
     write_config(
         &temp,
-        &baseline_config("echo 'METRIC latency_p95=45'", None, None),
+        &baseline_config(&metric_echo("latency_p95", 45), None, None),
     );
 
     let stdout = Command::cargo_bin("autoloop")
@@ -89,8 +89,8 @@ fn eval_discards_when_metric_guardrail_fails() {
     write_config(
         &temp,
         &baseline_config(
-            "echo 'METRIC latency_p95=50'",
-            Some("echo 'METRIC memory_mb=100'"),
+            &metric_echo("latency_p95", 50),
+            Some(&metric_echo("memory_mb", 100)),
             None,
         ),
     );
@@ -105,8 +105,8 @@ fn eval_discards_when_metric_guardrail_fails() {
     write_config(
         &temp,
         &baseline_config(
-            "echo 'METRIC latency_p95=45'",
-            Some("echo 'METRIC memory_mb=130'"),
+            &metric_echo("latency_p95", 45),
+            Some(&metric_echo("memory_mb", 130)),
             None,
         ),
     );
@@ -132,7 +132,7 @@ fn eval_refuses_when_pending_eval_exists() {
     init_workspace(&temp);
     write_config(
         &temp,
-        &baseline_config("echo 'METRIC latency_p95=50'", None, None),
+        &baseline_config(&metric_echo("latency_p95", 50), None, None),
     );
 
     Command::cargo_bin("autoloop")
@@ -144,7 +144,7 @@ fn eval_refuses_when_pending_eval_exists() {
 
     write_config(
         &temp,
-        &baseline_config("echo 'METRIC latency_p95=45'", None, None),
+        &baseline_config(&metric_echo("latency_p95", 45), None, None),
     );
 
     Command::cargo_bin("autoloop")
@@ -176,7 +176,7 @@ fn eval_crash_is_logged_after_retries() {
     init_workspace(&temp);
     write_config(
         &temp,
-        &baseline_config("echo 'METRIC latency_p95=50'", None, None),
+        &baseline_config(&metric_echo("latency_p95", 50), None, None),
     );
 
     Command::cargo_bin("autoloop")
@@ -278,4 +278,8 @@ fn read_jsonl(path: std::path::PathBuf) -> Vec<Value> {
         .lines()
         .map(|line| serde_json::from_str(line).expect("jsonl line should parse"))
         .collect()
+}
+
+fn metric_echo(name: &str, value: u64) -> String {
+    format!("echo METRIC {name}={value}")
 }
