@@ -22,7 +22,6 @@ pub enum ExperimentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ExperimentRecord {
     pub id: u64,
     #[serde(default)]
@@ -54,7 +53,6 @@ pub struct ExperimentRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MetricRecord {
     pub name: String,
     pub value: f64,
@@ -67,7 +65,6 @@ pub struct MetricRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ExperimentTags {
     #[serde(default)]
     pub file_paths: Vec<String>,

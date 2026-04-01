@@ -14,7 +14,6 @@ pub const SESSION_FILE: &str = "session.md";
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct State {
     pub schema_version: u32,
     pub active_session: Option<SessionState>,
@@ -40,7 +39,6 @@ impl Default for State {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SessionState {
     pub id: String,
     #[serde(default)]
@@ -49,7 +47,6 @@ pub struct SessionState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MetricSnapshot {
     pub name: String,
     pub value: f64,
@@ -59,7 +56,6 @@ pub struct MetricSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct LastEvalState {
     pub schema_version: u32,
     #[serde(default)]
@@ -78,7 +74,6 @@ impl Default for LastEvalState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PreparedExperiment {
     #[serde(default)]
     pub description: Option<String>,
@@ -87,7 +82,6 @@ pub struct PreparedExperiment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PendingEval {
     pub metric: MetricSnapshot,
     pub delta_from_baseline: f64,
@@ -104,7 +98,6 @@ pub struct PendingEval {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct RecordedWorktree {
     #[serde(default)]
     pub file_paths: Vec<String>,
@@ -121,7 +114,6 @@ pub struct RecordedWorktree {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct PathState {
     pub path: String,
     #[serde(default)]
@@ -133,14 +125,12 @@ pub struct PathState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct GuardrailBaseline {
     pub name: String,
     pub value: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct GuardrailOutcome {
     pub name: String,
     pub kind: GuardrailKind,
@@ -157,7 +147,6 @@ pub struct GuardrailOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct CommandCapture {
     pub command: String,
     #[serde(default)]

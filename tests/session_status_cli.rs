@@ -185,6 +185,66 @@ fn status_scopes_to_active_session_and_all_history() {
     assert_eq!(all_payload["analysis"]["discarded"], 1);
 }
 
+#[test]
+fn status_tolerates_future_fields_in_last_eval_state() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    init_git_repo(&temp);
+    init_workspace(&temp);
+
+    fs::write(
+        temp.path().join(".autoloop/last_eval.json"),
+        r#"{
+  "schema_version": 1,
+  "future_field": { "mode": "preview" },
+  "pending_eval": {
+    "metric": {
+      "name": "latency_p95",
+      "value": 42.0,
+      "unit": "ms",
+      "recorded_at": "2026-04-01T00:00:00Z",
+      "future_metric_note": "ignored"
+    },
+    "delta_from_baseline": -8.0,
+    "confidence": 1.5,
+    "verdict": "keep",
+    "command": {
+      "command": "echo 'METRIC latency_p95=42'",
+      "exit_code": 0,
+      "stdout": "METRIC latency_p95=42\n",
+      "stderr": "",
+      "timed_out": false,
+      "future_capture": true
+    },
+    "guardrails": [],
+    "worktree": {
+      "file_paths": ["tracked.txt"],
+      "untracked_paths": [],
+      "auto_categories": ["tracked"],
+      "path_states": [],
+      "future_worktree": "ignored"
+    },
+    "future_pending": "ignored"
+  }
+}
+"#,
+    )
+    .expect("last_eval should write");
+
+    let stdout = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["status", "--json", "--all"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let payload: Value = serde_json::from_slice(&stdout).expect("status json should parse");
+    assert_eq!(payload["pending_eval"]["verdict"], "keep");
+    assert_eq!(payload["pending_eval"]["metric"]["value"], 42.0);
+}
+
 fn init_git_repo(temp: &TempDir) {
     let repo = Repository::init(temp.path()).expect("git repo should initialize");
     fs::write(temp.path().join("tracked.txt"), "hello\n").expect("tracked file should write");
