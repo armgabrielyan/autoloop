@@ -311,10 +311,13 @@ pub fn create_review_branch(
     })
 }
 
-pub fn commit_all(root: &Path, message: &str) -> Result<String> {
+pub fn commit_recorded_worktree(
+    root: &Path,
+    recorded: &RecordedWorktree,
+    message: &str,
+) -> Result<String> {
     let repo = require_repository(root)?;
-    let snapshot = capture_working_tree(root)?;
-    if !snapshot.has_changes {
+    if recorded.file_paths.is_empty() {
         bail!("working tree has no changes to commit");
     }
 
@@ -322,16 +325,8 @@ pub fn commit_all(root: &Path, message: &str) -> Result<String> {
         operation: "open git index",
         source,
     })?;
-    index
-        .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
-        .map_err(|source| GitError::Operation {
-            operation: "stage changes",
-            source,
-        })?;
-    index.write().map_err(|source| GitError::Operation {
-        operation: "write git index",
-        source,
-    })?;
+    reset_index_to_head(&repo, &mut index)?;
+    stage_recorded_worktree(&repo, &mut index, recorded)?;
 
     let tree_id = index.write_tree().map_err(|source| GitError::Operation {
         operation: "write git tree",
@@ -384,7 +379,92 @@ pub fn commit_all(root: &Path, message: &str) -> Result<String> {
         }
     };
 
+    sync_index_to_recorded_worktree(&repo, recorded)?;
+
     Ok(commit_id.to_string())
+}
+
+fn reset_index_to_head(repo: &Repository, index: &mut git2::Index) -> Result<()> {
+    match head_tree(repo)? {
+        Some(tree) => index
+            .read_tree(&tree)
+            .map_err(|source| GitError::Operation {
+                operation: "reset index to HEAD tree",
+                source,
+            })?,
+        None => index.clear().map_err(|source| GitError::Operation {
+            operation: "clear index",
+            source,
+        })?,
+    }
+
+    Ok(())
+}
+
+fn stage_recorded_worktree(
+    repo: &Repository,
+    index: &mut git2::Index,
+    recorded: &RecordedWorktree,
+) -> Result<()> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow!("git operations require a non-bare repository"))?;
+
+    let (existing, removed): (Vec<String>, Vec<String>) = if recorded.path_states.is_empty() {
+        recorded
+            .file_paths
+            .iter()
+            .cloned()
+            .partition(|path| workdir.join(path).exists())
+    } else {
+        let mut existing = Vec::new();
+        let mut removed = Vec::new();
+        for state in &recorded.path_states {
+            if state.exists {
+                existing.push(state.path.clone());
+            } else {
+                removed.push(state.path.clone());
+            }
+        }
+        (existing, removed)
+    };
+
+    if !existing.is_empty() {
+        for path in existing {
+            let absolute = workdir.join(&path);
+            if absolute.is_dir() {
+                index
+                    .add_all([path.as_str()].iter(), IndexAddOption::DEFAULT, None)
+                    .map_err(|source| GitError::Operation {
+                        operation: "stage recorded directory",
+                        source,
+                    })?;
+            } else {
+                index
+                    .add_path(Path::new(&path))
+                    .map_err(|source| GitError::Operation {
+                        operation: "stage recorded path",
+                        source,
+                    })?;
+            }
+        }
+    }
+
+    for path in removed {
+        let relative = Path::new(&path);
+        match index.remove_path(relative) {
+            Ok(()) => {}
+            Err(error) if error.code() == ErrorCode::NotFound => {}
+            Err(source) => {
+                return Err(GitError::Operation {
+                    operation: "remove deleted path from commit index",
+                    source,
+                }
+                .into());
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn revert_paths(root: &Path, file_paths: &[String], untracked_paths: &[String]) -> Result<()> {
@@ -460,6 +540,19 @@ pub fn revert_paths(root: &Path, file_paths: &[String], untracked_paths: &[Strin
         remove_relative_path(&workdir, path)?;
     }
 
+    Ok(())
+}
+
+fn sync_index_to_recorded_worktree(repo: &Repository, recorded: &RecordedWorktree) -> Result<()> {
+    let mut index = repo.index().map_err(|source| GitError::Operation {
+        operation: "open git index",
+        source,
+    })?;
+    stage_recorded_worktree(repo, &mut index, recorded)?;
+    index.write().map_err(|source| GitError::Operation {
+        operation: "write git index",
+        source,
+    })?;
     Ok(())
 }
 

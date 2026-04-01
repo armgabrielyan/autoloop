@@ -298,6 +298,103 @@ fn keep_survives_git_exclude_changes_when_experiment_paths_match() {
 }
 
 #[test]
+fn keep_commit_only_includes_recorded_experiment_paths() {
+    let temp = TempDir::new().expect("tempdir should exist");
+    init_git_repo(&temp);
+    fs::write(temp.path().join("notes.txt"), "notes base\n").expect("notes file should write");
+    git_commit_all(temp.path(), "add notes");
+
+    init_workspace(&temp);
+    fs::write(temp.path().join("metric.txt"), "METRIC latency_p95=50\n")
+        .expect("metric file should write");
+    write_config(&temp, &config("advisory", "cat metric.txt"));
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .arg("baseline")
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::write(temp.path().join("notes.txt"), "notes dirty\n").expect("notes file should drift");
+    fs::write(temp.path().join("AGENTS.md"), "# Preexisting wrapper\n")
+        .expect("wrapper file should write");
+
+    Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "pre",
+            "--description",
+            "keep experiment paths without committing unrelated dirty files",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success();
+
+    fs::write(temp.path().join("tracked.txt"), "changed once\n").expect("tracked file should edit");
+    fs::write(temp.path().join("metric.txt"), "METRIC latency_p95=45\n")
+        .expect("metric file should write");
+
+    let stdout = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args(["eval", "--json"])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let eval_payload: Value = serde_json::from_slice(&stdout).expect("json output should parse");
+    assert_eq!(eval_payload["verdict"], "rerun");
+
+    let stdout = Command::cargo_bin("autoloop")
+        .expect("binary should build")
+        .args([
+            "keep",
+            "--description",
+            "commit experiment paths only",
+            "--commit",
+            "--json",
+        ])
+        .current_dir(temp.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let payload: Value = serde_json::from_slice(&stdout).expect("json output should parse");
+    assert_eq!(payload["status"], "kept");
+    let commit_hash = payload["record"]["commit_hash"]
+        .as_str()
+        .expect("commit hash should exist");
+    assert!(!commit_hash.is_empty());
+
+    let repo = Repository::discover(temp.path()).expect("git repo should exist");
+    let head = repo
+        .head()
+        .expect("HEAD should exist")
+        .peel_to_commit()
+        .expect("HEAD commit should resolve");
+    let tree = head.tree().expect("HEAD tree should resolve");
+    assert_eq!(
+        read_tree_file(&repo, &tree, "tracked.txt"),
+        "changed once\n"
+    );
+    assert_eq!(
+        read_tree_file(&repo, &tree, "metric.txt"),
+        "METRIC latency_p95=45\n"
+    );
+    assert_eq!(read_tree_file(&repo, &tree, "notes.txt"), "notes base\n");
+    assert!(tree.get_path(std::path::Path::new("AGENTS.md")).is_err());
+
+    assert_eq!(
+        fs::read_to_string(temp.path().join("notes.txt")).expect("notes file should read"),
+        "notes dirty\n"
+    );
+    assert!(temp.path().join("AGENTS.md").exists());
+}
+
+#[test]
 fn discard_refuses_when_worktree_drifted() {
     let temp = TempDir::new().expect("tempdir should exist");
     init_git_repo(&temp);
@@ -364,6 +461,43 @@ fn init_git_repo(temp: &TempDir) {
         Signature::now("Autoloop Tests", "tests@example.com").expect("git signature should exist");
     repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
         .expect("initial commit should succeed");
+}
+
+fn git_commit_all(path: &std::path::Path, message: &str) {
+    let repo = Repository::discover(path).expect("git repo should exist");
+    let mut index = repo.index().expect("git index should open");
+    index
+        .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+        .expect("files should stage");
+    index.write().expect("git index should write");
+
+    let tree_id = index.write_tree().expect("tree should write");
+    let tree = repo.find_tree(tree_id).expect("tree should resolve");
+    let parent = repo
+        .head()
+        .expect("HEAD should exist")
+        .peel_to_commit()
+        .expect("HEAD commit should resolve");
+    let signature =
+        Signature::now("Autoloop Tests", "tests@example.com").expect("git signature should exist");
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        &[&parent],
+    )
+    .expect("commit should succeed");
+}
+
+fn read_tree_file(repo: &Repository, tree: &git2::Tree<'_>, path: &str) -> String {
+    let entry = tree
+        .get_path(std::path::Path::new(path))
+        .expect("tree entry should exist");
+    let object = entry.to_object(repo).expect("tree object should resolve");
+    let blob = object.as_blob().expect("tree entry should be a blob");
+    String::from_utf8(blob.content().to_vec()).expect("blob content should be utf-8")
 }
 
 fn init_workspace(temp: &TempDir) {

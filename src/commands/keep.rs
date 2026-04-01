@@ -8,7 +8,7 @@ use crate::experiments::{
     ExperimentRecord, ExperimentStatus, ExperimentTags, MetricRecord, append_record,
     summarize_records,
 };
-use crate::git::{commit_all, pending_worktree_matches};
+use crate::git::{commit_recorded_worktree, pending_worktree_matches};
 use crate::output::emit;
 use crate::state::{EvalVerdict, LastEvalState, RecordedWorktree, State, write_session_markdown};
 use crate::ui::{TableRow, Tone, banner, join_blocks, render_list, render_steps, render_table};
@@ -48,8 +48,9 @@ pub fn run(args: KeepArgs, output: OutputFormat) -> Result<()> {
         } else if pending_eval.worktree.file_paths.is_empty() {
             git_notes.push("commit skipped because the working tree has no changes".to_string());
         } else {
-            match commit_all(
+            match commit_recorded_worktree(
                 &root,
+                &pending_eval.worktree,
                 &format!("{} {}", config.git.commit_prefix, args.description),
             ) {
                 Ok(hash) => commit_hash = Some(hash),

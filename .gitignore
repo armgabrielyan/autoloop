@@ -16,3 +16,4 @@ venv/
 
 # JetBrains IDEs / RustRover
 .idea/
+.autoloop/
