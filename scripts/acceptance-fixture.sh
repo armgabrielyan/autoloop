@@ -91,6 +91,27 @@ EOF
   printf 'Recording baseline...\n'
   baseline_json="$("$binary" baseline --json)"
   printf '%s\n' "$baseline_json" | grep -q '"metric"'
+
+  find . -type d \( -name "__pycache__" -o -name ".pytest_cache" -o -name ".mypy_cache" \) -prune -exec rm -rf {} +
+  find . -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+
+  if [ -n "$(git status --short)" ]; then
+    printf 'Committing setup-only integration files to start the manual run clean...\n'
+    for path in .gitignore AGENTS.md .agents; do
+      if [ -e "$path" ]; then
+        git add "$path"
+      fi
+    done
+    if ! git diff --cached --quiet; then
+      git commit -q -m "prepare autoloop integration"
+    fi
+  fi
+
+  if [ -n "$(git status --short)" ]; then
+    printf 'Prepared workspace is still dirty after setup normalization.\n' >&2
+    git status --short >&2
+    exit 1
+  fi
 )
 
 cat <<EOF
@@ -102,9 +123,10 @@ Workspace:
 
 Manual bounded run:
   1. Open the workspace above in Codex.
-  2. Invoke the installed \`autoloop-run\` wrapper with:
+  2. The repo is intentionally left with a clean \`git status\` so the loop starts from a non-experiment baseline.
+  3. Invoke the installed \`autoloop-run\` wrapper with:
      Use \`autoloop-run\` to reduce the benchmark latency in this repo. Keep behavior unchanged. Use at most 5 experiments, prefer fully automatic setup, and ask me only if you are genuinely blocked.
-  3. After the run, inspect:
+  4. After the run, inspect:
      - autoloop status --all
      - autoloop learn --all
      - git log --oneline --decorate --graph --all

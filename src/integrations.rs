@@ -318,6 +318,8 @@ mod tests {
         assert!(command.contains("autoloop doctor --json"));
         assert!(command.contains("autoloop doctor --fix --json"));
         assert!(command.contains("default to 5 experiments"));
+        assert!(command.contains("Do not edit `.git/info/exclude`"));
+        assert!(command.contains("setup-only"));
     }
 
     #[test]

@@ -36,6 +36,7 @@ For each fixture, the script proves:
 - replacing `.autoloop/config.toml` with the stock template makes `autoloop doctor` report an unhealthy config
 - `autoloop doctor --fix` repairs the config back to a verified inferred config
 - `autoloop baseline` succeeds against the repaired config
+- setup-only integration files are committed and generated cache noise is cleaned so the prepared repo starts the manual run with a clean `git status`
 
 The script leaves a ready temp repo behind for the manual gate.
 
@@ -50,6 +51,7 @@ Use `autoloop-run` to reduce the benchmark latency in this repo. Keep behavior u
 This gate passes when all of the following are true:
 
 - the agent uses the installed wrapper rather than inventing a separate workflow
+- the run starts from the clean prepared repo state instead of treating wrapper-install files as the first experiment
 - the run stays bounded and does not ask for routine per-experiment input
 - the repo ends with no unresolved pending evals
 - `.autoloop/experiments.jsonl` records at least one experiment
