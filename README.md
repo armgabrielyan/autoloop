@@ -52,7 +52,21 @@ Use it when you want agents to:
 
 ## 🎬 Demo
 
-This is the intended high-level flow in a real repo:
+Screenshots from a real bounded run on [`examples/smoke-python-search`](examples/smoke-python-search/README.md):
+
+### 1. The agent makes a small change, evaluates it, and records a kept win
+
+![AutoLoop keep flow](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/1.png)
+
+### 2. The run ends with a measurable result and clean experiment history
+
+![AutoLoop status](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/2.png)
+
+### 3. AutoLoop refreshes concrete learnings from the session
+
+![AutoLoop learnings](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/3.png)
+
+The high-level flow looks like this:
 
 ```bash
 # Bootstrap and verify the repo-specific config
