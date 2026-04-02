@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/armgabrielyan/autoloop/compare/v0.1.0...v0.1.1) (2026-04-02)
+
+
+### Bug Fixes
+
+* use vendored libgit2 to avoid openssl dependencies ([528c5f2](https://github.com/armgabrielyan/autoloop/commit/528c5f2abc78ee058162af654fbfabe25c05f76a))
+
 ## 0.1.0 (2026-04-02)
 
 
