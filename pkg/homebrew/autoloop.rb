@@ -10,7 +10,7 @@ class Autoloop < Formula
   desc "Agent-agnostic iterative optimization CLI"
   homepage "https://github.com/armgabrielyan/autoloop"
   license "MIT"
-  version "0.1.1" # x-release-please-version
+  version "0.1.2" # x-release-please-version
 
   on_macos do
     on_intel do
