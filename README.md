@@ -28,8 +28,6 @@ Use it when you want agents to:
 ## Table of Contents
 
 - [Demo](#-demo)
-- [The Idea](#-the-idea)
-- [How It Works](#-how-it-works)
 - [Features](#-features)
 - [Installation](#-installation)
   - [Quick Install](#-quick-install-macoslinux)
@@ -37,9 +35,11 @@ Use it when you want agents to:
   - [npm](#-npmnpx)
   - [Cargo](#-cargo)
   - [Manual Download](#-manual-download)
-  - [Build from Source](#-build-from-source)
+- [Build from Source](#-build-from-source)
 - [Quick Start](#-quick-start)
 - [Running the Agent](#-running-the-agent)
+- [The Idea](#-the-idea)
+- [How It Works](#-how-it-works)
 - [Agent Integrations](#-agent-integrations)
 - [Direct CLI Workflow](#-direct-cli-workflow)
 - [Usage Examples](#-usage-examples)
@@ -76,6 +76,11 @@ autoloop baseline
 
 # Install agent wrappers for your preferred runtime
 autoloop install codex
+# autoloop install claude-code
+# autoloop install cursor
+# autoloop install opencode
+# autoloop install gemini-cli
+# autoloop install generic
 
 # Then tell the agent:
 # "Use `autoloop-run` to reduce benchmark latency in this repo.
@@ -88,43 +93,6 @@ autoloop finalize --session
 ```
 
 For a real end-to-end fixture walkthrough, see [docs/examples/real-workflow.md](docs/examples/real-workflow.md).
-
-## 💡 The Idea
-
-The core idea is simple:
-
-give an AI coding agent a real repo, a real eval command, a real correctness guardrail, and let it experiment autonomously in a bounded loop.
-
-Each iteration is small and attributable:
-
-1. propose one experiment
-2. make one change
-3. run the metric and guardrails
-4. keep the win or discard the regression
-5. record the result
-6. repeat
-
-You wake up to:
-
-- a baseline
-- a history of experiments
-- concrete learnings
-- committed wins or discarded dead ends
-- reviewable branches instead of a vague “the agent tried stuff”
-
-That is the `autoresearch` idea translated from a specific training script into general software-engineering repos.
-
-## ⚙️ How It Works
-
-AutoLoop separates the optimization loop into a few explicit phases:
-
-- **Setup**: `autoloop init --verify` infers `.autoloop/config.toml` from the repo, and `autoloop doctor` proves whether the inferred commands actually work
-- **Baseline**: `autoloop baseline` records the starting metric and any metric-style guardrail baselines
-- **Loop**: the agent runs bounded experiments using `pre`, `eval`, `keep`, and `discard`
-- **Learning**: `autoloop learn` refreshes `.autoloop/learnings.md` from recorded outcomes
-- **Finalization**: `autoloop finalize` turns committed wins into clean review branches
-
-The installed wrappers like `autoloop-run` sit above this low-level CLI and orchestrate the loop automatically.
 
 ## ✨ Features
 
@@ -207,6 +175,11 @@ autoloop baseline
 
 # 4. Install an agent integration
 autoloop install codex
+#    or: autoloop install claude-code
+#    or: autoloop install cursor
+#    or: autoloop install opencode
+#    or: autoloop install gemini-cli
+#    or: autoloop install generic
 ```
 
 Then invoke the installed wrapper in your agent. For example, in Codex:
@@ -237,11 +210,66 @@ Use `autoloop-run` to reduce the benchmark latency in this repo. Keep behavior u
 Run `/autoloop-run` for this repo. Reduce the benchmark latency, keep behavior unchanged, use at most 5 experiments, and only ask me if you are genuinely blocked.
 ```
 
+### Cursor
+
+```text
+Use `autoloop-run` in this workspace to run a bounded optimization loop. Reduce the benchmark latency, keep behavior unchanged, and stop after at most 5 experiments unless you are blocked earlier.
+```
+
+### OpenCode
+
+```text
+Use `autoloop-run` to optimize this repo in a bounded loop. Preserve behavior, use at most 5 experiments, and only ask for input if you are genuinely blocked.
+```
+
+### Gemini CLI
+
+```text
+Use `autoloop-run` to reduce the benchmark latency in this repo. Keep behavior unchanged, use at most 5 experiments, and minimize user interaction.
+```
+
 ### Generic
 
 ```text
 Use the AutoLoop program in this repo to run a bounded optimization loop. Reduce benchmark latency, preserve behavior, limit the run to 5 experiments, and keep user interaction minimal.
 ```
+
+## 💡 The Idea
+
+The core idea is simple:
+
+give an AI coding agent a real repo, a real eval command, a real correctness guardrail, and let it experiment autonomously in a bounded loop.
+
+Each iteration is small and attributable:
+
+1. propose one experiment
+2. make one change
+3. run the metric and guardrails
+4. keep the win or discard the regression
+5. record the result
+6. repeat
+
+You wake up to:
+
+- a baseline
+- a history of experiments
+- concrete learnings
+- committed wins or discarded dead ends
+- reviewable branches instead of a vague “the agent tried stuff”
+
+That is the `autoresearch` idea translated from a specific training script into general software-engineering repos.
+
+## ⚙️ How It Works
+
+AutoLoop separates the optimization loop into a few explicit phases:
+
+- **Setup**: `autoloop init --verify` infers `.autoloop/config.toml` from the repo, and `autoloop doctor` proves whether the inferred commands actually work
+- **Baseline**: `autoloop baseline` records the starting metric and any metric-style guardrail baselines
+- **Loop**: the agent runs bounded experiments using `pre`, `eval`, `keep`, and `discard`
+- **Learning**: `autoloop learn` refreshes `.autoloop/learnings.md` from recorded outcomes
+- **Finalization**: `autoloop finalize` turns committed wins into clean review branches
+
+The installed wrappers like `autoloop-run` sit above this low-level CLI and orchestrate the loop automatically.
 
 ## 🤖 Agent Integrations
 
