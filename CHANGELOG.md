@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/armgabrielyan/autoloop/compare/v0.1.2...v0.1.3) (2026-04-02)
+
+
+### Bug Fixes
+
+* correct npm package name to @armengabrielyan/autoloop ([8451909](https://github.com/armgabrielyan/autoloop/commit/84519095562b8a9af72d4bd6ebbfb51543a6fefa))
+
 ## [0.1.2](https://github.com/armgabrielyan/autoloop/compare/v0.1.1...v0.1.2) (2026-04-02)
 
 
