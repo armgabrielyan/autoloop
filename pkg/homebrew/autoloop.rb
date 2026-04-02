@@ -15,24 +15,24 @@ class Autoloop < Formula
   on_macos do
     on_intel do
       url "https://github.com/armgabrielyan/autoloop/releases/download/v#{version}/autoloop-#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "46b8b1039c73c41b8dc7e52a333b5cd52f3a4535bba5f949015e8b97e882ee2a"
+      sha256 "cba6042af71f9c41dec40ed9f856645f68c60168c195b88d913cad642263fc39"
     end
 
     on_arm do
       url "https://github.com/armgabrielyan/autoloop/releases/download/v#{version}/autoloop-#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "6f4951b36ce498e822d30b251c6e2dcaae0668f7bec1fc223269cd9b0f466f90"
+      sha256 "e7aa7c4f12bf4c6a526885f113b8eb027da064b260f3b0488a5614722886ae91"
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/armgabrielyan/autoloop/releases/download/v#{version}/autoloop-#{version}-x86_64-unknown-linux-gnu.tar.gz"
-      sha256 "9a7a73fda141e02e1dd903c7b215d33ce2c363553a27bea7a2aff8c6e718c721"
+      sha256 "89293b227e717269c91931143c4ec397695e13547cdfacf6cbf5e11b8beee417"
     end
 
     on_arm do
       url "https://github.com/armgabrielyan/autoloop/releases/download/v#{version}/autoloop-#{version}-aarch64-unknown-linux-gnu.tar.gz"
-      sha256 "3a1fb762e6a11ca382568f67daa3f2c82b2057ed9e2c852646038735280c1c77"
+      sha256 "a744a0455fd9a390ac7c13cb2ab0bae980776c65ba7ecbcaabe6a9f66e0b2a3a"
     end
   end
 
