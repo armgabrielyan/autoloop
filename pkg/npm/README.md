@@ -1,17 +1,17 @@
-# @armgabrielyan/autoloop npm package
+# @armengabrielyan/autoloop npm package
 
 This is the npm distribution package for [autoloop](https://github.com/armgabrielyan/autoloop), a CLI for agent-agnostic optimization loops.
 
 ## Installation
 
 ```bash
-npm install -g @armgabrielyan/autoloop
+npm install -g @armengabrielyan/autoloop
 ```
 
 For one-off usage with `npx`:
 
 ```bash
-npx @armgabrielyan/autoloop --help
+npx @armengabrielyan/autoloop --help
 ```
 
 ## What this package does

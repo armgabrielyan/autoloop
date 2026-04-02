@@ -2,8 +2,8 @@
 
 [![crates.io](https://img.shields.io/crates/v/autoloop.svg)](https://crates.io/crates/autoloop)
 [![crates.io downloads](https://img.shields.io/crates/d/autoloop.svg)](https://crates.io/crates/autoloop)
-[![npm version](https://img.shields.io/npm/v/%40armgabrielyan%2Fautoloop)](https://www.npmjs.com/package/@armgabrielyan/autoloop)
-[![npm downloads](https://img.shields.io/npm/dm/%40armgabrielyan%2Fautoloop)](https://www.npmjs.com/package/@armgabrielyan/autoloop)
+[![npm version](https://img.shields.io/npm/v/%40armengabrielyan%2Fautoloop)](https://www.npmjs.com/package/@armengabrielyan/autoloop)
+[![npm downloads](https://img.shields.io/npm/dm/%40armengabrielyan%2Fautoloop)](https://www.npmjs.com/package/@armengabrielyan/autoloop)
 [![CI](https://github.com/armgabrielyan/autoloop/actions/workflows/ci.yml/badge.svg)](https://github.com/armgabrielyan/autoloop/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -117,10 +117,10 @@ brew install armgabrielyan/tap/autoloop
 
 ```bash
 # Install globally
-npm install -g @armgabrielyan/autoloop
+npm install -g @armengabrielyan/autoloop
 
 # Or run directly
-npx @armgabrielyan/autoloop --help
+npx @armengabrielyan/autoloop --help
 ```
 
 ### 🦀 Cargo
