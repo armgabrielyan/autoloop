@@ -52,19 +52,11 @@ Use it when you want agents to:
 
 ## 🎬 Demo
 
-Screenshots from a real bounded run on [`examples/smoke-python-search`](examples/smoke-python-search/README.md):
+A real bounded run on [`examples/smoke-python-search`](examples/smoke-python-search/README.md) looks like this:
 
-### 1. The agent makes a small change, evaluates it, and records a kept win
-
-![AutoLoop keep flow](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/1.png)
-
-### 2. The run ends with a measurable result and clean experiment history
-
-![AutoLoop status](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/2.png)
-
-### 3. AutoLoop refreshes concrete learnings from the session
-
-![AutoLoop learnings](https://raw.githubusercontent.com/armgabrielyan/autoloop/main/assets/3.png)
+- the agent makes a small change
+- `autoloop eval` records whether it should be kept, discarded, or rerun
+- the run ends with a measurable result, clean experiment history, and refreshed learnings
 
 The high-level flow looks like this:
 
@@ -92,7 +84,7 @@ autoloop learn --all
 autoloop finalize --session
 ```
 
-For a real end-to-end fixture walkthrough, see [docs/examples/real-workflow.md](docs/examples/real-workflow.md).
+For the full end-to-end fixture walkthrough, see [docs/examples/real-workflow.md](docs/examples/real-workflow.md).
 
 ## ✨ Features
 
