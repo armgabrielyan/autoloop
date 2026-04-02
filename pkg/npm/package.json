@@ -1,6 +1,6 @@
 {
   "name": "@armgabrielyan/autoloop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "npm package for the AutoLoop CLI. Installs the `autoloop` command for agent-agnostic optimization loops.",
   "repository": {
     "type": "git",
